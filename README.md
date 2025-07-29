@@ -1,6 +1,7 @@
 # Gemini PWA Client Mk-II
 
-本家PWA（https://github.com/ona-oni/geminipwa）に新たな機能を追加した改造版です。
+本家PWA（https://github.com/ona-oni/geminipwa）
+に新たな機能を追加した改造版です。
 
 ## 追加機能
 * APIエラー時の自動リトライ機能
