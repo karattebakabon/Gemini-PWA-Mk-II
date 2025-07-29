@@ -1,7 +1,6 @@
 # Gemini PWA Client Mk-II
 
-[本家PWA]（https://github.com/ona-oni/geminipwa/）
-に新たな機能を追加した改造版です。
+[本家PWA](https://github.com/ona-oni/geminipwa/)に新たな機能を追加した自分用の改造版です。
 
 ## 追加機能
 * APIエラー時の自動リトライ機能
@@ -10,13 +9,13 @@
 APIが生成した文章を別のモデルで校正出来ます。デフォルトでは「gemini-2.5-flash」で読点を抑制するシスプロが入力されています。
 flash以外も指定可能ですが、flash-liteは能力不足、proは料金が高く生成時間が長いためflashが適任かと。
 * 画像のサムネイル表示機能
-大きな画像を表示する場合、サムネイルで表示して選択時に大きくなります。
+大きな画像を表示する場合、サムネイルで表示してクリック時に拡大表示。
 
 ## 使い方
 
 使用方法は本家と同様です。
 
-[index.htmlへのリンク(Github Pages)](https://ona-oni.github.io/geminipwa/)
+[index.htmlへのリンク(Github Pages)](https://kinkan04.github.io/Gemini-PWA-Mk-II/)
 ※このリポジトリの内容が静的にアクセスできる
 
 1. GeminiのAPIキーを準備。
