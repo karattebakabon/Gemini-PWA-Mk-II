@@ -1,6 +1,6 @@
 # Gemini PWA Client Mk-II
 
-本家PWA（https://github.com/ona-oni/geminipwa）
+[本家PWA]（https://github.com/ona-oni/geminipwa/）
 に新たな機能を追加した改造版です。
 
 ## 追加機能
