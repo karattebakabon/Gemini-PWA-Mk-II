@@ -1,8 +1,8 @@
 # Gemini PWA Client Mk-II
 
 [本家PWA](https://github.com/ona-oni/geminipwa/)をベースに、独自の機能を追加したカスタマイズ版です。
-
-<br>
+バグの報告はコンソールログ付きでIssuesに上げてもらえると助かります。
+個別のサポートは行っておりません。
 
 ## 目次
 *   [使い方](#使い方)
