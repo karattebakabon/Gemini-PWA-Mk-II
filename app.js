@@ -19,7 +19,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.26"; // Thought summaries対応、streamingのバグ修正
+const APP_VERSION = "0.31";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
@@ -73,6 +73,7 @@ const extensionToMimeTypeMap = {
 // --- DOM要素 ---
 const elements = {
     appContainer: document.querySelector('.app-container'),
+    appHeader: document.querySelector('.app-header'),
     chatScreen: document.getElementById('chat-screen'),
     historyScreen: document.getElementById('history-screen'),
     settingsScreen: document.getElementById('settings-screen'),
@@ -161,6 +162,12 @@ const elements = {
     autoRetryOptionsDiv: document.getElementById('auto-retry-options'),
     googleSearchApiKeyInput: document.getElementById('google-search-api-key'),
     googleSearchEngineIdInput: document.getElementById('google-search-engine-id'),
+    overlayOpacitySlider: document.getElementById('overlay-opacity-slider'),
+    overlayOpacityValue: document.getElementById('overlay-opacity-value'),
+    headerColorInput: document.getElementById('header-color-input'),
+    resetHeaderColorBtn: document.getElementById('reset-header-color-btn'),
+    messageOpacitySlider: document.getElementById('message-opacity-slider'),
+    messageOpacityValue:  document.getElementById('message-opacity-value'),
 };
 
 // --- アプリ状態 ---
@@ -205,6 +212,9 @@ const state = {
         geminiEnableFunctionCalling: false,
         googleSearchApiKey: '',
         googleSearchEngineId: '',
+        messageOpacity: 1,
+        overlayOpacity: 0.65,
+        headerColor: '',
     },
     backgroundImageUrl: null,
     isSending: false,
@@ -439,6 +449,23 @@ const dbUtils = {
             request.onsuccess = (event) => {
                 const settingsArray = event.target.result;
                 const loadedSettings = {};
+                const ensureFloat = (v, fallback) => {
+                    if (v === null || v === undefined) return fallback;
+                    const n = (typeof v === 'string') ? parseFloat(v) : Number(v);
+                    return Number.isFinite(n) ? n : fallback;
+                };
+                if (loadedSettings.chatOverlayOpacity != null && loadedSettings.overlayOpacity == null) {
+                loadedSettings.overlayOpacity = ensureFloat(
+                    loadedSettings.chatOverlayOpacity,
+                    (state?.settings?.overlayOpacity ?? 0.65)
+                );
+                }
+                if (loadedSettings.overlayOpacity != null) {
+                    loadedSettings.overlayOpacity = ensureFloat(
+                    loadedSettings.overlayOpacity,
+                    (state?.settings?.overlayOpacity ?? 0.65)
+                );
+                }
                 settingsArray.forEach(item => {
                     loadedSettings[item.key] = item.value;
                 });
@@ -483,11 +510,11 @@ const dbUtils = {
                         } else if (typeof defaultValue === 'number' || defaultValue === null) {
                              // 数値 (オプションのものはnullを扱う)
                              let num;
-                             if (key === 'temperature' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty') {
-                                 num = parseFloat(loadedValue);
-                             } else { // streamingSpeed, maxTokens, topK
-                                 num = parseInt(loadedValue, 10);
-                             }
+                             if (key === 'temperature' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty' || key === 'overlayOpacity' || key === 'messageOpacity') {
+                                num = parseFloat(loadedValue);
+                            } else { // streamingSpeed, maxTokens, topK
+                                num = parseInt(loadedValue, 10);
+                            }
 
                              // パース失敗、またはオプションパラメータがnull/空で読み込まれたかチェック
                              if (isNaN(num)) {
@@ -499,13 +526,15 @@ const dbUtils = {
                                  }
                              } else {
                                   // 範囲を持つ数値のバリデーション (オプション)
-                                  if (key === 'temperature' && (num < 0 || num > 2)) num = defaultValue;
-                                  if (key === 'maxTokens' && num < 1) num = defaultValue;
-                                  if (key === 'topK' && num < 1) num = defaultValue;
-                                  if (key === 'topP' && (num < 0 || num > 1)) num = defaultValue;
-                                  if (key === 'streamingSpeed' && num < 0) num = defaultValue;
-                                  if ((key === 'presencePenalty' || key === 'frequencyPenalty') && (num < -2.0 || num > 2.0)) num = defaultValue;
-                                  state.settings[key] = num;
+                                    if (key === 'temperature' && (num < 0 || num > 2)) num = defaultValue;
+                                    if (key === 'maxTokens' && num < 1) num = defaultValue;
+                                    if (key === 'topK' && num < 1) num = defaultValue;
+                                    if (key === 'topP' && (num < 0 || num > 1)) num = defaultValue;
+                                    if (key === 'streamingSpeed' && num < 0) num = defaultValue;
+                                    if ((key === 'presencePenalty' || key === 'frequencyPenalty') && (num < -2.0 || num > 2.0)) num = defaultValue;
+                                    if (key === 'overlayOpacity')   num = Math.min(1, Math.max(0,    num));
+                                    if (key === 'messageOpacity')   num = Math.min(1, Math.max(0.10, num));
+                                    state.settings[key] = num;
                              }
                         } else if (typeof defaultValue === 'string') {
                              // 文字列: 読み込んだ値が文字列なら使用、そうでなければデフォルト
@@ -529,6 +558,35 @@ const dbUtils = {
 
 
                 console.log("設定読み込み完了:", { ...state.settings, backgroundImageBlob: state.settings.backgroundImageBlob ? '[Blob]' : null });
+                {
+                    uiUtils.applyOverlayOpacity();
+                    // --- オーバーレイ（保存値 0.0〜1.0）---
+                    const ov = Number(state.settings?.overlayOpacity ?? 0.65);
+                    const ovPct = Math.round(ov * 100);
+                    // UI（スライダーと％表示）
+                    const ovSlider = document.getElementById('overlay-opacity-slider');   // 0〜95, step 5
+                    const ovValue  = document.getElementById('overlay-opacity-value');
+                    if (ovSlider) {
+                      const clamped = Math.max(0, Math.min(95, Math.round(ovPct / 5) * 5));
+                      ovSlider.value = clamped;
+                    }
+                    if (ovValue) ovValue.textContent = `${ovPct}%`;
+                    // CSS変数（#chat-screen::before で使用）
+                    document.documentElement.style.setProperty('--overlay-opacity', String(ov)); // :contentReference[oaicite:0]{index=0}
+                  
+                    // --- メッセージバブル（保存値 0.0〜1.0）---
+                    const mv = Number(state.settings?.messageOpacity ?? 1);
+                    const mvPct = Math.round(mv * 100);
+                    const msgSlider = document.getElementById('message-opacity-slider');  // 10〜100, step 5
+                    const msgValue  = document.getElementById('message-opacity-value');
+                    if (msgSlider) {
+                      const clamped = Math.max(10, Math.min(100, Math.round(mvPct / 5) * 5));
+                      msgSlider.value = clamped;
+                    }
+                    if (msgValue) msgValue.textContent = `${mvPct}%`;
+                    // CSS変数（style.css の色合成で使用）
+                    document.documentElement.style.setProperty('--message-bubble-opacity', String(mv));
+                  }
                 resolve(state.settings);
             };
             request.onerror = (event) => reject(`設定読み込みエラー: ${event.target.error}`);
@@ -536,8 +594,6 @@ const dbUtils = {
     },
 
     // チャットを保存 (タイトル指定可)
-    // dbUtils オブジェクト内の saveChat 関数を置き換えてください
-    // dbUtils オブジェクト内の saveChat 関数を置き換えてください
     async saveChat(optionalTitle = null, chatObjectToSave = null) { // 第2引数を追加
         await this.openDB();
         
@@ -760,6 +816,12 @@ const dbUtils = {
 const uiUtils = {
     setLoadingIndicatorText(text) {
         elements.loadingIndicator.textContent = text;
+    },
+    // オーバーレイの透明度を適用
+    applyOverlayOpacity() {
+        const opacityValue = state.settings.overlayOpacity;
+        document.documentElement.style.setProperty('--overlay-opacity', opacityValue);
+        console.log(`オーバーレイ透明度適用: ${opacityValue}`);
     },
     // チャットメッセージをレンダリング
     renderChatMessages() {
@@ -1381,6 +1443,22 @@ const uiUtils = {
             elements.deleteBackgroundBtn.classList.add('hidden');
         }
     },
+
+    applyHeaderColor() {
+        const customColor = state.settings.headerColor;
+        if (customColor) {
+            // カスタム色が設定されていれば、--header-color-custom 変数を設定
+            document.documentElement.style.setProperty('--header-color-custom', customColor);
+        } else {
+            // 設定がなければ、--header-color-custom 変数を削除してデフォルトに戻す
+            document.documentElement.style.removeProperty('--header-color-custom');
+        }
+        // ヘッダーの色が確定した後に、ブラウザのテーマカラーを更新
+        // getComputedStyleで実際に適用されている色を取得
+        const finalHeaderColor = getComputedStyle(elements.appHeader).backgroundColor;
+        elements.themeColorMeta.content = finalHeaderColor;
+        console.log(`ヘッダーカラー適用。テーマカラー: ${finalHeaderColor}`);
+    },
     // ------------------------------------
 
     // 設定をUIに適用
@@ -1420,12 +1498,25 @@ const uiUtils = {
         elements.autoRetryOptionsDiv.classList.toggle('hidden', !state.settings.enableAutoRetry);
         elements.googleSearchApiKeyInput.value = state.settings.googleSearchApiKey || '';
         elements.googleSearchEngineIdInput.value = state.settings.googleSearchEngineId || '';
+        const opacityPercent = Math.round((state.settings.overlayOpacity ?? 0.65) * 100);
+        if (elements.overlayOpacitySlider) elements.overlayOpacitySlider.value = opacityPercent;
+        if (elements.overlayOpacityValue)  elements.overlayOpacityValue.textContent = `${opacityPercent}%`;
+        // メッセージバブルの濃さ（UI と CSS へ）
+        const msgPercent = Math.round((state.settings.messageOpacity ?? 1) * 100);
+        if (elements.messageOpacitySlider) elements.messageOpacitySlider.value = msgPercent;
+        if (elements.messageOpacityValue)  elements.messageOpacityValue.textContent = `${msgPercent}%`;
+        document.documentElement.style.setProperty('--message-bubble-opacity', String(state.settings.messageOpacity ?? 1));
+
+        const defaultHeaderColor = state.settings.darkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+        elements.headerColorInput.value = state.settings.headerColor || defaultHeaderColor;
 
         this.updateUserModelOptions();
         this.updateBackgroundSettingsUI();
         this.applyDarkMode();
         this.applyFontFamily();
         this.toggleSystemPromptVisibility();
+        this.applyOverlayOpacity();
+        this.applyHeaderColor();
     },
 
     // ユーザー指定モデルをコンボボックスに反映
@@ -1462,6 +1553,8 @@ const uiUtils = {
         document.body.classList.toggle('light-mode-forced', !isDark);
         elements.themeColorMeta.content = isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
         console.log(`ダークモード ${isDark ? '有効' : '無効'}. テーマカラー: ${elements.themeColorMeta.content}`);
+        this.applyOverlayOpacity();
+        this.applyHeaderColor();
     },
 
     // フォント設定を適用
@@ -2355,6 +2448,51 @@ const appLogic = {
         elements.saveSettingsBtns.forEach(button => {
             button.addEventListener('click', () => this.saveSettings());
         });
+        if (elements.overlayOpacitySlider) {
+            elements.overlayOpacitySlider.addEventListener('input', (e) => {
+                const raw = Number(e.target.value) || 0;      // 0〜95（あなたのUI仕様）
+                const clamped = Math.max(0, Math.min(95, raw));
+                const v = clamped / 100;                      // 0.00〜0.95
+                state.settings.overlayOpacity = v;
+                dbUtils.saveSetting('overlayOpacity', v).catch(console.error);
+          
+              // パーセント表示を即更新
+              if (elements.overlayOpacityValue) {
+                elements.overlayOpacityValue.textContent = `${Math.round(v * 100)}%`;
+              }
+          
+              // state にも反映（保存は「設定を保存」で）
+              if (state?.settings) state.settings.overlayOpacity = v;
+          
+              // 見た目へ即反映（あなたの実装を呼ぶ）
+              if (typeof uiUtils?.applyOverlayOpacity === 'function') {
+                uiUtils.applyOverlayOpacity();
+              } else {
+                // 念のため：直接CSS変数を更新（関数が無い場合）
+                document.documentElement.style.setProperty('--overlay-opacity', String(v));
+              }
+            });
+          }
+        // メッセージ濃さのリアルタイム反映
+        if (elements.messageOpacitySlider) {
+            elements.messageOpacitySlider.addEventListener('input', (e) => {
+            const raw = Number(e.target.value) || 100;   // 10〜100
+            const clamped = Math.max(10, Math.min(100, raw));
+            const v = clamped / 100;                     // 0.10〜1.00
+            state.settings.messageOpacity = v;
+            dbUtils.saveSetting('messageOpacity', v).catch(console.error);
+        
+            if (elements.messageOpacityValue) {
+                elements.messageOpacityValue.textContent = `${clamped}%`;
+            }
+            // CSS変数へ即反映（style.css 側で --message-bubble-opacity を使用）
+            document.documentElement.style.setProperty('--message-bubble-opacity', String(v));
+        
+            // state にも即時反映（保存は「設定を保存」で行う）
+            if (state?.settings) state.settings.messageOpacity = v;
+            });
+        }
+        
         elements.updateAppBtn.addEventListener('click', () => this.updateApp());
         elements.clearDataBtn.addEventListener('click', () => this.confirmClearAllData());
 
@@ -2378,6 +2516,38 @@ const appLogic = {
             event.target.value = null; // 同じファイルを選択できるようにリセット
         });
         elements.deleteBackgroundBtn.addEventListener('click', () => this.confirmDeleteBackgroundImage());
+
+        if (elements.messageOpacitySlider) {
+            elements.messageOpacitySlider.addEventListener('input', (e) => {
+              const raw = Number(e.target.value) || 100;     // 10〜100
+              const clamped = Math.max(10, Math.min(100, raw));
+              const v = clamped / 100;                       // 0.10〜1.00
+              // 画面の表示
+              if (elements.messageOpacityValue) {
+                elements.messageOpacityValue.textContent = `${clamped}%`;
+              }
+              // CSS変数に即反映
+              document.documentElement.style.setProperty('--message-bubble-opacity', String(v));
+              // state も即時更新（あなたの保存ロジックに合わせて）
+              if (state?.settings) state.settings.messageOpacity = v;
+            });
+          }
+        
+
+        // ヘッダーカラーピッカーのリアルタイム更新
+        elements.headerColorInput.addEventListener('input', () => {
+            const newColor = elements.headerColorInput.value;
+            state.settings.headerColor = newColor; // stateをリアルタイム更新
+            uiUtils.applyHeaderColor(); // CSS変数をリアルタイム更新
+        });
+
+        // ヘッダーカラーリセットボタン
+        elements.resetHeaderColorBtn.addEventListener('click', () => {
+            state.settings.headerColor = ''; // stateをリセット
+            // UIをデフォルト値に戻して再適用
+            elements.headerColorInput.value = state.settings.darkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+            uiUtils.applyHeaderColor();
+        });
 
         // SP非表示トグルリスナー
         elements.hideSystemPromptToggle.addEventListener('change', () => {
@@ -3546,6 +3716,8 @@ const appLogic = {
 
     // 設定を保存
     async saveSettings() {
+        const defaultHeaderColor = elements.darkModeToggle.checked ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+        const currentHeaderColor = elements.headerColorInput.value;
         const newSettings = {
             apiKey: elements.apiKeyInput.value.trim(),
             modelName: elements.modelNameSelect.value,
@@ -3580,6 +3752,9 @@ const appLogic = {
             proofreadingSystemInstruction: elements.proofreadingSystemInstructionTextarea.value.trim(),
             googleSearchApiKey: elements.googleSearchApiKeyInput.value.trim(),
             googleSearchEngineId: elements.googleSearchEngineIdInput.value.trim(),
+            overlayOpacity: parseFloat(elements.overlayOpacitySlider.value) / 100,
+            messageOpacity: (parseFloat(elements.messageOpacitySlider?.value) || 100) / 100,
+            headerColor: elements.headerColorInput.value,
         };
 
         if (isNaN(newSettings.streamingSpeed) || newSettings.streamingSpeed < 0) {
