@@ -1,3 +1,4 @@
+// app.js
 // --- 定数 ---
 const DB_NAME = 'GeminiPWA_DB';
 const DB_VERSION = 8; // スキーマ変更なしのため据え置き
@@ -19,7 +20,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.31";
+const APP_VERSION = "0.32";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
@@ -106,6 +107,9 @@ const elements = {
     frequencyPenaltyInput: document.getElementById('frequency-penalty'),
     thinkingBudgetInput: document.getElementById('thinking-budget'),
     includeThoughtsToggle: document.getElementById('include-thoughts-toggle'),
+    thoughtTranslationOptionsDiv: document.getElementById('thought-translation-options'),
+    enableThoughtTranslationCheckbox: document.getElementById('enable-thought-translation'),
+    thoughtTranslationModelSelect: document.getElementById('thought-translation-model'),
     dummyUserInput: document.getElementById('dummy-user'),
     dummyModelInput: document.getElementById('dummy-model'),
     concatDummyModelCheckbox: document.getElementById('concat-dummy-model'),
@@ -191,6 +195,8 @@ const state = {
         frequencyPenalty: null,
         thinkingBudget: null,
         includeThoughts: true,
+        enableThoughtTranslation: true, // 思考プロセスの翻訳を有効にするか
+        thoughtTranslationModel: 'gemini-2.5-flash-lite',
         dummyUser: '',
         dummyModel: '',
         concatDummyModel: false,
@@ -249,10 +255,9 @@ function updateMessageMaxWidthVar() {
 }
 
 let resizeTimer;
-window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    // Debounce処理: リサイズ完了後に一度だけ実行
-    resizeTimer = setTimeout(updateMessageMaxWidthVar, 150);
+window.addEventListener('DOMContentLoaded', (event) => {
+    console.log("DOM fully loaded and parsed. Initializing app...");
+    appLogic.initializeApp();
 });
 
 // --- ユーティリティ関数 ---
@@ -320,15 +325,32 @@ function fileToBase64(file) {
 // --- Service Worker関連 ---
 function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
+        // リロード処理が重複しないように制御するフラグ
+        let isReloading = false;
+
+        const reloadPage = () => {
+            if (isReloading) return;
+            isReloading = true;
+            uiUtils.showCustomAlert('アプリが更新されました。ページをリロードします。')
+                .then(() => {
+                    window.location.reload();
+                });
+        };
+
+        // 1. Service Workerの自動更新を監視
+        navigator.serviceWorker.addEventListener('controllerchange', reloadPage);
+
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
                 .then(registration => {
                     console.log('ServiceWorker登録成功 スコープ: ', registration.scope);
-                    // Service Workerからのメッセージ受信
+                    
+                    // 2. 手動更新完了のメッセージを監視
                     navigator.serviceWorker.addEventListener('message', event => {
-                        if (event.data && event.data.action === 'reloadPage') {
-                            alert('アプリが更新されました。ページをリロードします。');
-                            window.location.reload();
+                        // sw.jsからキャッシュクリア完了のメッセージを受け取ったらリロード
+                        if (event.data && event.data.status === 'cacheCleared') {
+                            console.log('Service Workerからキャッシュクリア完了のメッセージを受信。リロードを実行します。');
+                            reloadPage();
                         }
                     });
                 })
@@ -470,62 +492,56 @@ const dbUtils = {
                     loadedSettings[item.key] = item.value;
                 });
 
-                // stateから初期のデフォルト設定を取得
                 const defaultSettings = { ...state.settings };
-
-                // state.settingsをデフォルトにリセットしてから読み込んだ値を適用
                 state.settings = { ...defaultSettings };
 
-                // デフォルト値の上に読み込んだ値を適用し、型安全性を確保
                 for (const key in loadedSettings) {
-                     if (key in defaultSettings) { // デフォルト状態に存在するキーのみ処理
+                        if (key in defaultSettings) {
                         const loadedValue = loadedSettings[key];
                         const defaultValue = defaultSettings[key];
 
                         if (key === 'backgroundImageBlob') {
-                            // 背景画像はBlobまたはnullのみ受け入れる
                             if (loadedValue instanceof Blob) {
-                                 state.settings[key] = loadedValue;
+                                    state.settings[key] = loadedValue;
                             } else {
-                                 if (loadedValue !== null) console.warn(`読み込んだ 'backgroundImageBlob' がBlobではありません。nullに設定します。型: ${typeof loadedValue}`);
-                                 state.settings[key] = null; // Blobでないか明示的にnullならnullを使用
+                                    if (loadedValue !== null) console.warn(`読み込んだ 'backgroundImageBlob' がBlobではありません。nullに設定します。型: ${typeof loadedValue}`);
+                                    state.settings[key] = null;
                             }
                         } else if (
+                            // ★★★ ここから修正 ★★★
+                            // 真偽値のリストに新しい設定項目を追加
                             key === 'darkMode' || key === 'streamingOutput' || 
                             key === 'pseudoStreaming' || key === 'enterToSend' || 
                             key === 'concatDummyModel' || key === 'hideSystemPromptInChat' ||
                             key === 'enableSwipeNavigation' || key === 'includeThoughts' ||
                             key === 'geminiEnableGrounding' || key === 'geminiEnableFunctionCalling' ||
-                            key === 'enableProofreading' || key === 'enableAutoRetry'
+                            key === 'enableProofreading' || key === 'enableAutoRetry' ||
+                            key === 'enableThoughtTranslation' // ← 追加
+                            // ★★★ 修正ここまで ★★★
                         ) {
-                             // その他の真偽値: 厳密にtrueかチェック
-                             state.settings[key] = loadedValue === true;
+                                state.settings[key] = loadedValue === true;
                         } else if (key === 'thinkingBudget') {
                             const num = parseInt(loadedValue, 10);
-                            if (isNaN(num) || num < 0) { // 整数かつ0以上かチェック
-                                state.settings[key] = null; // 不正値はnull
+                            if (isNaN(num) || num < 0) {
+                                state.settings[key] = null;
                             } else {
                                 state.settings[key] = num;
                             }
                         } else if (typeof defaultValue === 'number' || defaultValue === null) {
-                             // 数値 (オプションのものはnullを扱う)
-                             let num;
-                             if (key === 'temperature' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty' || key === 'overlayOpacity' || key === 'messageOpacity') {
+                                let num;
+                                if (key === 'temperature' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty' || key === 'overlayOpacity' || key === 'messageOpacity') {
                                 num = parseFloat(loadedValue);
-                            } else { // streamingSpeed, maxTokens, topK
+                            } else {
                                 num = parseInt(loadedValue, 10);
                             }
 
-                             // パース失敗、またはオプションパラメータがnull/空で読み込まれたかチェック
-                             if (isNaN(num)) {
-                                 // パース失敗した場合、オプションパラメータで元々null/空が意図されていたかチェック
-                                 if ((key === 'temperature' || key === 'maxTokens' || key === 'topK' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty') && (loadedValue === null || loadedValue === '')) {
-                                      state.settings[key] = null; // nullのままにする
-                                 } else {
-                                      state.settings[key] = defaultValue; // 不正な必須数値ならデフォルトにリセット
-                                 }
-                             } else {
-                                  // 範囲を持つ数値のバリデーション (オプション)
+                                if (isNaN(num)) {
+                                    if ((key === 'temperature' || key === 'maxTokens' || key === 'topK' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty') && (loadedValue === null || loadedValue === '')) {
+                                        state.settings[key] = null;
+                                    } else {
+                                        state.settings[key] = defaultValue;
+                                    }
+                                } else {
                                     if (key === 'temperature' && (num < 0 || num > 2)) num = defaultValue;
                                     if (key === 'maxTokens' && num < 1) num = defaultValue;
                                     if (key === 'topK' && num < 1) num = defaultValue;
@@ -535,58 +551,50 @@ const dbUtils = {
                                     if (key === 'overlayOpacity')   num = Math.min(1, Math.max(0,    num));
                                     if (key === 'messageOpacity')   num = Math.min(1, Math.max(0.10, num));
                                     state.settings[key] = num;
-                             }
+                                }
                         } else if (typeof defaultValue === 'string') {
-                             // 文字列: 読み込んだ値が文字列なら使用、そうでなければデフォルト
-                             state.settings[key] = typeof loadedValue === 'string' ? loadedValue : defaultValue;
+                                state.settings[key] = typeof loadedValue === 'string' ? loadedValue : defaultValue;
                         } else {
-                            // defaultSettingsが適切に定義されていればここには来ないはず
+                            // この警告は '予期しない設定タイプ' として残す
                             console.warn(`予期しない設定タイプ キー: ${key}`);
                             state.settings[key] = loadedValue;
                         }
                     } else {
-                        console.warn(`DBから読み込んだ未知の設定を無視: ${key}`);
+                        // DBに存在するがstateのデフォルトにないキーは無視
+                        // console.warn(`DBから読み込んだ未知の設定を無視: ${key}`);
                     }
                 }
 
-                // 設定が明示的にtrueとして保存されていない場合、OSのダークモード設定を初期適用
                 if (state.settings.darkMode !== true && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                     console.log("OSのダークモード設定を初期適用");
-                     state.settings.darkMode = true;
-                     // 注意: これはDBにはすぐ保存しない。ユーザーが切り替えて保存する必要がある
+                        console.log("OSのダークモード設定を初期適用");
+                        state.settings.darkMode = true;
                 }
-
 
                 console.log("設定読み込み完了:", { ...state.settings, backgroundImageBlob: state.settings.backgroundImageBlob ? '[Blob]' : null });
                 {
                     uiUtils.applyOverlayOpacity();
-                    // --- オーバーレイ（保存値 0.0〜1.0）---
                     const ov = Number(state.settings?.overlayOpacity ?? 0.65);
                     const ovPct = Math.round(ov * 100);
-                    // UI（スライダーと％表示）
-                    const ovSlider = document.getElementById('overlay-opacity-slider');   // 0〜95, step 5
+                    const ovSlider = document.getElementById('overlay-opacity-slider');
                     const ovValue  = document.getElementById('overlay-opacity-value');
                     if (ovSlider) {
-                      const clamped = Math.max(0, Math.min(95, Math.round(ovPct / 5) * 5));
-                      ovSlider.value = clamped;
+                        const clamped = Math.max(0, Math.min(95, Math.round(ovPct / 5) * 5));
+                        ovSlider.value = clamped;
                     }
                     if (ovValue) ovValue.textContent = `${ovPct}%`;
-                    // CSS変数（#chat-screen::before で使用）
-                    document.documentElement.style.setProperty('--overlay-opacity', String(ov)); // :contentReference[oaicite:0]{index=0}
-                  
-                    // --- メッセージバブル（保存値 0.0〜1.0）---
+                    document.documentElement.style.setProperty('--overlay-opacity', String(ov));
+                    
                     const mv = Number(state.settings?.messageOpacity ?? 1);
                     const mvPct = Math.round(mv * 100);
-                    const msgSlider = document.getElementById('message-opacity-slider');  // 10〜100, step 5
+                    const msgSlider = document.getElementById('message-opacity-slider');
                     const msgValue  = document.getElementById('message-opacity-value');
                     if (msgSlider) {
-                      const clamped = Math.max(10, Math.min(100, Math.round(mvPct / 5) * 5));
-                      msgSlider.value = clamped;
+                        const clamped = Math.max(10, Math.min(100, Math.round(mvPct / 5) * 5));
+                        msgSlider.value = clamped;
                     }
                     if (msgValue) msgValue.textContent = `${mvPct}%`;
-                    // CSS変数（style.css の色合成で使用）
                     document.documentElement.style.setProperty('--message-bubble-opacity', String(mv));
-                  }
+                    }
                 resolve(state.settings);
             };
             request.onerror = (event) => reject(`設定読み込みエラー: ${event.target.error}`);
@@ -1476,6 +1484,11 @@ const uiUtils = {
         elements.frequencyPenaltyInput.value = state.settings.frequencyPenalty === null ? '' : state.settings.frequencyPenalty;
         elements.thinkingBudgetInput.value = state.settings.thinkingBudget === null ? '' : state.settings.thinkingBudget;
         elements.includeThoughtsToggle.checked = state.settings.includeThoughts;
+        elements.enableThoughtTranslationCheckbox.checked = state.settings.enableThoughtTranslation;
+        elements.thoughtTranslationModelSelect.value = state.settings.thoughtTranslationModel || 'gemini-2.5-flash-lite';
+        // 「Include Thoughts」が有効な場合のみ翻訳オプションを表示
+        elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !state.settings.includeThoughts);
+        elements.dummyUserInput.value = state.settings.dummyUser || '';
         elements.dummyUserInput.value = state.settings.dummyUser || '';
         elements.dummyModelInput.value = state.settings.dummyModel || '';
         elements.concatDummyModelCheckbox.checked = state.settings.concatDummyModel;
@@ -1927,12 +1940,10 @@ const apiUtils = {
         };
         
         let finalTools = [];
-        // 優先度1: Function Callingが設定で有効になっているかチェック
         if (state.settings.geminiEnableFunctionCalling) {
             finalTools = window.functionDeclarations || [];
             console.log("Function Calling を有効にしてAPIを呼び出します。");
         } 
-        // 優先度2: Function Callingが無効で、Google Searchが有効になっているかチェック
         else if (state.settings.geminiEnableGrounding) {
             finalTools.push({ "google_search": {} });
             console.log("グラウンディング (Google Search) を有効にしてAPIを呼び出します。");
@@ -2102,14 +2113,13 @@ const apiUtils = {
                     lastCandidateInfo = chunkJson.candidates[0];
                     if (lastCandidateInfo?.content?.parts) {
                         lastCandidateInfo.content.parts.forEach(part => {
-                            if (typeof part.text === 'string') {
+                            if (part.text) {
                                 if (part.thought === true) {
                                     thoughtText = (thoughtText || '') + part.text;
                                 } else {
                                     contentText = (contentText || '') + part.text;
                                 }
-                            }
-                            if (part.functionCall) {
+                            } else if (part.functionCall) {
                                 if (!currentToolCalls) currentToolCalls = [];
                                 currentToolCalls.push({ functionCall: part.functionCall });
                             }
@@ -2146,6 +2156,95 @@ const apiUtils = {
             }
         }
     },
+
+    /**
+     * テキストを日本語に翻訳する関数
+     * @param {string} textToTranslate - 翻訳対象の英語テキスト
+     * @param {string} translationModelName - 翻訳に使用するモデル名
+     * @returns {Promise<string>} 翻訳された日本語テキスト。失敗した場合は元の英語テキストを返す。
+     */
+    async translateText(textToTranslate, translationModelName) {
+        if (!textToTranslate || textToTranslate.trim() === '') {
+            return textToTranslate;
+        }
+
+        const japaneseChars = textToTranslate.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/g) || [];
+        const japaneseRatio = japaneseChars.length / textToTranslate.length;
+
+        if (japaneseRatio > 0.5) {
+            console.log(`翻訳スキップ: 日本語の文字が${Math.round(japaneseRatio * 100)}%含まれているため、翻訳済みと判断しました。`);
+            return textToTranslate;
+        }
+
+        console.log("--- 思考プロセスの翻訳処理開始 ---");
+        
+        const modelToUse = translationModelName || 'gemini-2.5-flash-lite';
+        const apiKey = state.settings.apiKey;
+        if (!apiKey) {
+            console.warn("翻訳スキップ: APIキーが設定されていません。");
+            return textToTranslate;
+        }
+
+        const endpoint = `${GEMINI_API_BASE_URL}${modelToUse}:generateContent?key=${apiKey}`;
+        
+        const systemInstruction = {
+            parts: [{ text: "You are a professional translator. Translate the given English text into natural Japanese. Do not add any extra comments or explanations. Just output the translated Japanese text." }]
+        };
+
+        const requestBody = {
+            contents: [{
+                role: 'user',
+                parts: [{ text: textToTranslate }]
+            }],
+            systemInstruction,
+            generationConfig: {
+                temperature: 0.1,
+            },
+            safetySettings: [
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+            ]
+        };
+
+        try {
+            const abortController = new AbortController();
+            const timeoutId = setTimeout(() => abortController.abort(), 15000);
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+                signal: abortController.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                let errorBody = await response.text();
+                try { errorBody = JSON.parse(errorBody); } catch(e) { /* ignore */ }
+                console.error(`翻訳APIエラー (${response.status})`, errorBody);
+                throw new Error(`翻訳APIエラー (${response.status})`);
+            }
+
+            const responseData = await response.json();
+            if (responseData.candidates?.[0]?.content?.parts?.[0]?.text) {
+                const translatedText = responseData.candidates[0].content.parts[0].text;
+                console.log("--- 翻訳処理成功 ---");
+                return translatedText;
+            } else {
+                console.warn("翻訳APIの応答形式が不正、またはコンテンツが空です。", responseData);
+                if(responseData.promptFeedback) {
+                    console.warn("翻訳がブロックされた可能性があります:", responseData.promptFeedback);
+                }
+                throw new Error("翻訳APIの応答形式が不正です。");
+            }
+        } catch (error) {
+            console.error("思考プロセスの翻訳中にエラーが発生しました。原文を返します。", error);
+            return textToTranslate;
+        }
+    }
 };
 
 function updateCurrentSystemPrompt() {
@@ -2398,8 +2497,8 @@ const appLogic = {
         elements.gotoHistoryBtn.addEventListener('click', () => uiUtils.showScreen('history'));
         elements.gotoSettingsBtn.addEventListener('click', () => uiUtils.showScreen('settings'));
         // 戻るボタンは history.back() を使用
-        elements.backToChatFromHistoryBtn.addEventListener('click', () => history.back());
-        elements.backToChatFromSettingsBtn.addEventListener('click', () => history.back());
+        elements.backToChatFromHistoryBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
+        elements.backToChatFromSettingsBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
 
         // チャットアクション
         elements.newChatBtn.addEventListener('click', async () => {
@@ -2442,6 +2541,12 @@ const appLogic = {
             const file = event.target.files[0];
             if (file) this.handleHistoryImport(file);
             event.target.value = null; // 同じファイルを選択できるようにリセット
+        });
+
+        // 「Include Thoughts」トグルの変更を監視
+        elements.includeThoughtsToggle.addEventListener('change', () => {
+            const isEnabled = elements.includeThoughtsToggle.checked;
+            elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !isEnabled);
         });
 
         // 設定アクション
@@ -3311,6 +3416,9 @@ const appLogic = {
             let loopCount = 0;
             const MAX_LOOPS = 10;
             const executedFunctionNamesInTurn = [];
+            
+            // ★★★ ここから修正 ★★★
+            let finalModelMessage = null; // 最終的なモデルメッセージを一時的に保持
 
             while (loopCount < MAX_LOOPS) {
                 loopCount++;
@@ -3411,11 +3519,8 @@ const appLogic = {
                             originalResponse.isSelected = false;
                         }
                     }
-
-                    state.currentMessages.push(modelMessage);
-                    await dbUtils.saveChat();
-                    uiUtils.renderChatMessages();
-                    uiUtils.scrollToBottom();
+                    
+                    finalModelMessage = modelMessage; // 最終メッセージを保持してループを抜ける
                     break;
                 }
 
@@ -3434,11 +3539,28 @@ const appLogic = {
                 await dbUtils.saveChat();
             }
 
-            // whileループが上限に達した場合の処理
             if (loopCount >= MAX_LOOPS) {
                 console.error("Function Callingの最大ループ回数に達しました。処理を中断します。");
                 throw new Error("AIが同じ操作を繰り返しているようです。処理を中断しました。");
             }
+            
+            // 翻訳処理と最終的なUI更新
+            if (finalModelMessage) {
+                if (state.settings.enableThoughtTranslation && finalModelMessage.thoughtSummary) {
+                    uiUtils.setLoadingIndicatorText('思考プロセスを翻訳中...');
+                    const translatedThought = await apiUtils.translateText(finalModelMessage.thoughtSummary, state.settings.thoughtTranslationModel);
+                    finalModelMessage.thoughtSummary = translatedThought;
+                }
+                
+                // 翻訳が完了（または不要）な最終メッセージをstateに追加
+                state.currentMessages.push(finalModelMessage);
+                
+                // 画面に一度だけ表示
+                uiUtils.renderChatMessages();
+                await dbUtils.saveChat();
+                console.log("最終的なメッセージを表示し、保存しました。");
+            }
+            // ★★★ 修正ここまで ★★★
 
         } catch(error) {
             console.error("--- handleSend: 最終catchブロックでエラー捕捉 ---", error);
@@ -3451,7 +3573,10 @@ const appLogic = {
                 console.log("--- handleSend: リクエストが正常にキャンセルされました。---");
             }
         } finally {
-            console.log("--- handleSend: finallyブロック実行。送信状態を解除します。 ---");
+            console.log("--- handleSend: finallyブロック実行 ---");
+            
+            // finallyブロックからは翻訳処理を削除
+            
             uiUtils.setSendingState(false);
             state.abortController = null;
             state.partialStreamContent = '';
@@ -3732,6 +3857,10 @@ const appLogic = {
             frequencyPenalty: elements.frequencyPenaltyInput.value === '' ? null : parseFloat(elements.frequencyPenaltyInput.value),
             thinkingBudget: elements.thinkingBudgetInput.value === '' ? null : parseInt(elements.thinkingBudgetInput.value, 10),
             includeThoughts: elements.includeThoughtsToggle.checked,
+            enableThoughtTranslation: elements.enableThoughtTranslationCheckbox.checked,
+            thoughtTranslationModel: elements.thoughtTranslationModelSelect.value,
+
+            dummyUser: elements.dummyUserInput.value.trim(),
             dummyUser: elements.dummyUserInput.value.trim(),
             dummyModel: elements.dummyModelInput.value.trim(),
             concatDummyModel: elements.concatDummyModelCheckbox.checked,
@@ -3826,18 +3955,13 @@ const appLogic = {
             const registration = await navigator.serviceWorker.ready;
             
             if (registration && registration.active) {
+                // Service Workerにキャッシュクリアを指示します。
+                // リロード処理は、sw.jsからの完了メッセージを 'message' リスナーが受け取って実行します。
                 registration.active.postMessage({ action: 'clearCache' });
-                navigator.serviceWorker.addEventListener('message', function handler(event) {
-                    if (event.data && event.data.action === 'cacheCleared') {
-                        navigator.serviceWorker.removeEventListener('message', handler);
-                        window.location.reload();
-                    }
-                });
-
-                setTimeout(() => {
-                    console.warn("Service Workerからの応答がタイムアウトしました。強制的にリロードします。");
-                    window.location.reload();
-                }, 5000);
+                
+                // registration.update() はここでは不要です。
+                // 目的はキャッシュの強制クリアとリロードのため、
+                // Service Worker自体の更新チェックはブラウザの標準的なライフサイクルに任せます。
 
             } else {
                 await uiUtils.showCustomAlert("アクティブなService Workerが見つかりませんでした。ページを強制的に再読み込みします。");
@@ -4558,19 +4682,13 @@ const appLogic = {
                     throw new Error("リクエストがキャンセルされました。");
                 }
 
-                // リトライ時に待機処理（初回は待機しない）
                 if (attempt > 0) {
                     const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
-                    
-                    // ユーザーにリトライ中であることを通知
                     uiUtils.setLoadingIndicatorText(`APIエラー 再試行(${attempt}回目)... ${delay}ms待機`);
                     console.log(`API呼び出し失敗。${delay}ms後にリトライします... (試行 ${attempt + 1}/${maxRetries + 1})`);
-                    
                     await interruptibleSleep(delay, state.abortController.signal);
                 }
 
-                // API通信中のステータスメッセージを設定
-                // handleSendで"応答中..."が設定されているため、attempt > 0 の場合のみ上書き
                 if (attempt === 1) {
                     uiUtils.setLoadingIndicatorText('再試行中...');
                 } else if (attempt > 1) {
@@ -4579,17 +4697,15 @@ const appLogic = {
 
                 const response = await apiUtils.callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools);
 
-                // --- レスポンス内容のチェック ---
                 if (useStreaming) {
-                    // ストリーミングの場合、チャンクを処理しながらエラーを検知
                     let fullContent = '';
                     let fullThoughtSummary = '';
                     let toolCalls = null;
                     let finalMetadata = {};
 
+                    // ストリーミング応答の処理 (ここは変更なし)
                     for await (const chunk of apiUtils.handleStreamingResponse(response)) {
                         if (chunk.type === 'error') {
-                            // ストリーム内のエラーを検知したら、リトライ対象のエラーとしてスロー
                             throw new Error(chunk.message || 'ストリーム内でエラーが発生しました');
                         }
                         if (chunk.type === 'chunk') {
@@ -4601,12 +4717,10 @@ const appLogic = {
                         }
                     }
 
-                    // 空応答（テキストもツール呼び出しもない）の場合、リトライ対象のエラーとして扱う
                     if (!fullContent && !toolCalls) {
                         throw new Error("APIから空の応答が返されました。");
                     }
 
-                     // ストリーミングが正常に完了した場合の戻り値
                     return { 
                         content: fullContent, 
                         thoughtSummary: fullThoughtSummary,
@@ -4616,33 +4730,56 @@ const appLogic = {
                     };
 
                 } else {
-                    // 非ストリーミングの場合、レスポンスボディをパースしてチェック
                     const responseData = await response.json();
                     
-                    // コンテンツブロックを検知
                     if (responseData.promptFeedback) {
                         const blockReason = responseData.promptFeedback.blockReason || 'SAFETY';
                         throw new Error(`APIが応答をブロックしました (理由: ${blockReason})`);
                     }
-                    // 候補がない場合もエラーとして扱う
                     if (!responseData.candidates || responseData.candidates.length === 0) {
                         throw new Error("API応答に有効な候補が含まれていません。");
                     }
                     
                     const candidate = responseData.candidates[0];
                     const parts = candidate.content?.parts || [];
-                    const textPart = parts.find(p => p.text);
-                    const toolCallParts = parts.filter(p => p.functionCall);
+                    let finalContent = '';
+                    let finalThoughtSummary = ''; // 思考プロセスを格納する変数を追加
+                    let finalToolCalls = [];
 
-                    // 空応答（テキストもツール呼び出しもない）の場合、リトライ対象のエラーとして扱う
-                    if (!textPart && toolCallParts.length === 0) {
+                    // parts配列をループして、思考とそれ以外を分離する
+                    parts.forEach(part => {
+                        if (part.text) {
+                            // part.thoughtプロパティの有無で判断
+                            if (part.thought === true) {
+                                finalThoughtSummary += part.text;
+                            } else {
+                                finalContent += part.text;
+                            }
+                        } else if (part.functionCall) {
+                            finalToolCalls.push({ functionCall: part.functionCall });
+                        }
+                    });
+
+                    // 思考プロセスが別のフィールド `candidate.thoughts` に含まれる場合も考慮
+                    if (candidate.thoughts?.parts) {
+                        candidate.thoughts.parts.forEach(part => {
+                            if (part.text) {
+                                finalThoughtSummary += part.text;
+                            }
+                        });
+                    }
+                    
+                    // 空応答チェック
+                    if (!finalContent && finalToolCalls.length === 0) {
+                        // 思考プロセスのみ返ってきた場合は、それをコンテンツとして扱うか、エラーとするか
+                        // ここではエラーとしてリトライを促す
                         throw new Error("APIから空の応答が返されました。");
                     }
 
-                    // 正常な応答の戻り値
                     return {
-                        content: textPart?.text || '',
-                        toolCalls: toolCallParts.length > 0 ? toolCallParts : null,
+                        content: finalContent,
+                        thoughtSummary: finalThoughtSummary.trim() || null, // trimして空ならnull
+                        toolCalls: finalToolCalls.length > 0 ? finalToolCalls : null,
                         finishReason: candidate.finishReason,
                         safetyRatings: candidate.safetyRatings,
                         usageMetadata: responseData.usageMetadata,
@@ -4654,19 +4791,18 @@ const appLogic = {
                 lastError = error;
                 if (error.name === 'AbortError') {
                     console.error("待機中に中断されました。リトライを中止します。", error);
-                    throw error; // 中断エラーは即座にスロー
+                    throw error;
                 }
-                // 4xx系のクライアントエラーはリトライしない
                 if (error.status && error.status >= 400 && error.status < 500) {
                     console.error(`リトライ不可のエラー (ステータス: ${error.status})。リトライを中止します。`, error);
                     throw error;
                 }
                 console.warn(`API呼び出し/処理試行 ${attempt + 1} が失敗しました。`, error);
             }
-        } // forループ終了
+        }
 
         console.error("最大リトライ回数に達しました。最終的なエラーをスローします。");
-        throw lastError; // 最終的なエラーをスロー
+        throw lastError;
     },
 }; // appLogic終了
 
