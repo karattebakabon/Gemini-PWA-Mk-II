@@ -100,25 +100,15 @@
 
                     <label for="model-name">モデル名:</label>
                     <select id="model-name" aria-label="モデル名">
-                        <optgroup label="無料">
-                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                            <option value="gemini-2.5-flash-preview-04-17">gemini-2.5-flash-preview-04-17</option>
-                            <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview-05-20</option>
-                            <option value="gemini-2.5-pro-exp-03-25">gemini-2.5-pro-exp-03-25</option>
-                        </optgroup>
-                        <optgroup label="有料">
-                            <option value="gemini-2.5-pro-preview-03-25">gemini-2.5-pro-preview-03-25</option>
-                            <option value="gemini-2.5-pro-preview-05-06">gemini-2.5-pro-preview-05-06</option>
-                        </optgroup>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                        <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
                         <optgroup label="ユーザー指定" id="user-defined-models-group">
-                            <!-- 追加モデルはここにJSで挿入される -->
                         </optgroup>
                     </select>
 
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="streaming-output">
-                        ストリーミング出力を使用する
-                    </label>
                     <label for="streaming-speed">文字送り速度 (ミリ秒/文字):</label>
                     <input type="number" id="streaming-speed" min="0" step="1" placeholder="例: 30 (0で無効)" aria-label="文字送り速度">
                 </div>
@@ -200,7 +190,16 @@
                    <h3>アドバンスド</h3>
                    <label for="dummy-user">ダミー User プロンプト (送信時のみ追加):</label>
                    <textarea id="dummy-user" placeholder="API送信直前に user ロールとして履歴末尾に追加されます" aria-label="ダミー User プロンプト"></textarea>
-
+                   <div style="margin-left: 15px; margin-top: -5px; margin-bottom: 10px;">
+                    <label class="checkbox-label" style="font-size: 12px;">
+                        <input type="checkbox" id="apply-dummy-to-proofread">
+                        校正時にも適用する
+                    </label>
+                    <label class="checkbox-label" style="font-size: 12px;">
+                        <input type="checkbox" id="apply-dummy-to-translate">
+                        思考プロセス翻訳時にも適用する
+                    </label>
+                    </div>
                    <label for="dummy-model">ダミー Model プロンプト (送信時のみ追加):</label>
                    <textarea id="dummy-model" placeholder="API送信直前に model ロールとして履歴最末尾に追加されます" aria-label="ダミー Model プロンプト"></textarea>
 
@@ -212,6 +211,10 @@
                        ※チェック時、モデル応答の先頭に上記ダミーModelの内容を付与。
                    </p>
 
+                   <label class="checkbox-label">
+                        <input type="checkbox" id="streaming-output">
+                        ストリーミング出力を使用する
+                    </label>
                    <label class="checkbox-label">
                        <input type="checkbox" id="pseudo-streaming">
                        疑似ストリーミングを使用<br> (ストリーミングON時のみ有効)
@@ -230,6 +233,24 @@
                         <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
                             ※ 0に設定するとリトライしません。
                         </p>
+
+                        <label class="checkbox-label" style="margin-top: 15px;">
+                            <input type="checkbox" id="use-fixed-retry-delay">
+                            固定待機時間でリトライする
+                        </label>
+
+                        <div id="fixed-retry-delay-container" class="hidden">
+                            <label for="fixed-retry-delay-seconds">待機時間 (秒):</label>
+                            <input type="number" id="fixed-retry-delay-seconds" step="1" min="0" placeholder="例: 15">
+                        </div>
+
+                        <div id="max-backoff-delay-container">
+                             <label for="max-backoff-delay-seconds">指数バックオフの最大待機時間 (秒):</label>
+                             <input type="number" id="max-backoff-delay-seconds" step="1" min="0" placeholder="例: 60">
+                             <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
+                                 ※ リトライ毎に倍増する待機時間の上限を設定します。短いネットワークエラーは即座に、長いエラーには優しく対応します。
+                             </p>
+                        </div>
                     </div>
                 </div>
                       

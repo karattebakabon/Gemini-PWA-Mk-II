@@ -20,7 +20,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.32";
+const APP_VERSION = "0.33";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
@@ -111,6 +111,8 @@ const elements = {
     enableThoughtTranslationCheckbox: document.getElementById('enable-thought-translation'),
     thoughtTranslationModelSelect: document.getElementById('thought-translation-model'),
     dummyUserInput: document.getElementById('dummy-user'),
+    applyDummyToProofreadCheckbox: document.getElementById('apply-dummy-to-proofread'),
+    applyDummyToTranslateCheckbox: document.getElementById('apply-dummy-to-translate'),
     dummyModelInput: document.getElementById('dummy-model'),
     concatDummyModelCheckbox: document.getElementById('concat-dummy-model'),
     additionalModelsTextarea: document.getElementById('additional-models'),
@@ -164,6 +166,11 @@ const elements = {
     enableAutoRetryCheckbox: document.getElementById('enable-auto-retry'),
     maxRetriesInput: document.getElementById('max-retries'),
     autoRetryOptionsDiv: document.getElementById('auto-retry-options'),
+    useFixedRetryDelayCheckbox: document.getElementById('use-fixed-retry-delay'),
+    fixedRetryDelayContainer: document.getElementById('fixed-retry-delay-container'),
+    fixedRetryDelayInput: document.getElementById('fixed-retry-delay-seconds'),
+    maxBackoffDelayContainer: document.getElementById('max-backoff-delay-container'),
+    maxBackoffDelayInput: document.getElementById('max-backoff-delay-seconds'),
     googleSearchApiKeyInput: document.getElementById('google-search-api-key'),
     googleSearchEngineIdInput: document.getElementById('google-search-engine-id'),
     overlayOpacitySlider: document.getElementById('overlay-opacity-slider'),
@@ -198,6 +205,8 @@ const state = {
         enableThoughtTranslation: true, // 思考プロセスの翻訳を有効にするか
         thoughtTranslationModel: 'gemini-2.5-flash-lite',
         dummyUser: '',
+        applyDummyToProofread: false,
+        applyDummyToTranslate: false,
         dummyModel: '',
         concatDummyModel: false,
         additionalModels: '',
@@ -211,6 +220,9 @@ const state = {
         enableSwipeNavigation: true,
         enableAutoRetry: true,
         maxRetries: 30, 
+        useFixedRetryDelay: false,
+        fixedRetryDelaySeconds: 15,
+        maxBackoffDelaySeconds: 60,
         enableProofreading: false,
         proofreadingModelName: 'gemini-2.5-flash',
         proofreadingSystemInstruction: 'あなたはプロの編集者です。受け取った文章の過剰な読点を抑制し、日本語として違和感のない読点の使用量に校正してください。承知しました等の応答は行わず、校正後の文章のみ出力して下さい。読点の抑制以外の編集は禁止です。読点以外の文章には絶対に手を付けないで下さい。',
@@ -508,16 +520,16 @@ const dbUtils = {
                                     state.settings[key] = null;
                             }
                         } else if (
-                            // ★★★ ここから修正 ★★★
-                            // 真偽値のリストに新しい設定項目を追加
                             key === 'darkMode' || key === 'streamingOutput' || 
                             key === 'pseudoStreaming' || key === 'enterToSend' || 
                             key === 'concatDummyModel' || key === 'hideSystemPromptInChat' ||
                             key === 'enableSwipeNavigation' || key === 'includeThoughts' ||
                             key === 'geminiEnableGrounding' || key === 'geminiEnableFunctionCalling' ||
                             key === 'enableProofreading' || key === 'enableAutoRetry' ||
-                            key === 'enableThoughtTranslation' // ← 追加
-                            // ★★★ 修正ここまで ★★★
+                            key === 'useFixedRetryDelay' ||
+                            key === 'applyDummyToProofread' ||
+                            key === 'applyDummyToTranslate' ||
+                            key === 'enableThoughtTranslation'
                         ) {
                                 state.settings[key] = loadedValue === true;
                         } else if (key === 'thinkingBudget') {
@@ -1489,7 +1501,8 @@ const uiUtils = {
         // 「Include Thoughts」が有効な場合のみ翻訳オプションを表示
         elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !state.settings.includeThoughts);
         elements.dummyUserInput.value = state.settings.dummyUser || '';
-        elements.dummyUserInput.value = state.settings.dummyUser || '';
+        elements.applyDummyToProofreadCheckbox.checked = state.settings.applyDummyToProofread;
+        elements.applyDummyToTranslateCheckbox.checked = state.settings.applyDummyToTranslate;
         elements.dummyModelInput.value = state.settings.dummyModel || '';
         elements.concatDummyModelCheckbox.checked = state.settings.concatDummyModel;
         elements.additionalModelsTextarea.value = state.settings.additionalModels || '';
@@ -1509,6 +1522,12 @@ const uiUtils = {
         elements.enableAutoRetryCheckbox.checked = state.settings.enableAutoRetry;
         elements.maxRetriesInput.value = state.settings.maxRetries;
         elements.autoRetryOptionsDiv.classList.toggle('hidden', !state.settings.enableAutoRetry);
+        elements.useFixedRetryDelayCheckbox.checked = state.settings.useFixedRetryDelay;
+        elements.fixedRetryDelayInput.value = state.settings.fixedRetryDelaySeconds;
+        elements.maxBackoffDelayInput.value = state.settings.maxBackoffDelaySeconds;
+        // チェック状態に応じて表示を切り替える
+        elements.fixedRetryDelayContainer.classList.toggle('hidden', !state.settings.useFixedRetryDelay);
+        elements.maxBackoffDelayContainer.classList.toggle('hidden', state.settings.useFixedRetryDelay);
         elements.googleSearchApiKeyInput.value = state.settings.googleSearchApiKey || '';
         elements.googleSearchEngineIdInput.value = state.settings.googleSearchEngineId || '';
         const opacityPercent = Math.round((state.settings.overlayOpacity ?? 0.65) * 100);
@@ -2163,7 +2182,7 @@ const apiUtils = {
      * @param {string} translationModelName - 翻訳に使用するモデル名
      * @returns {Promise<string>} 翻訳された日本語テキスト。失敗した場合は元の英語テキストを返す。
      */
-    async translateText(textToTranslate, translationModelName) {
+     async translateText(textToTranslate, translationModelName) {
         if (!textToTranslate || textToTranslate.trim() === '') {
             return textToTranslate;
         }
@@ -2208,42 +2227,93 @@ const apiUtils = {
             ]
         };
 
-        try {
-            const abortController = new AbortController();
-            const timeoutId = setTimeout(() => abortController.abort(), 15000);
-
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-                signal: abortController.signal
+        if (state.settings.applyDummyToTranslate && state.settings.dummyUser) {
+            requestBody.contents.push({
+                role: 'user',
+                parts: [{ text: state.settings.dummyUser }]
             });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                let errorBody = await response.text();
-                try { errorBody = JSON.parse(errorBody); } catch(e) { /* ignore */ }
-                console.error(`翻訳APIエラー (${response.status})`, errorBody);
-                throw new Error(`翻訳APIエラー (${response.status})`);
-            }
-
-            const responseData = await response.json();
-            if (responseData.candidates?.[0]?.content?.parts?.[0]?.text) {
-                const translatedText = responseData.candidates[0].content.parts[0].text;
-                console.log("--- 翻訳処理成功 ---");
-                return translatedText;
-            } else {
-                console.warn("翻訳APIの応答形式が不正、またはコンテンツが空です。", responseData);
-                if(responseData.promptFeedback) {
-                    console.warn("翻訳がブロックされた可能性があります:", responseData.promptFeedback);
-                }
-                throw new Error("翻訳APIの応答形式が不正です。");
-            }
-        } catch (error) {
-            console.error("思考プロセスの翻訳中にエラーが発生しました。原文を返します。", error);
-            return textToTranslate;
+            console.log("翻訳リクエストにダミーUserプロンプトを適用しました。");
         }
+
+        let lastError = null;
+        const maxTranslationRetries = state.settings.enableAutoRetry ? state.settings.maxRetries : 0;
+
+        for (let attempt = 0; attempt <= maxTranslationRetries; attempt++) {
+            try {
+                if (state.abortController?.signal.aborted) {
+                    throw new Error("リクエストがキャンセルされました。");
+                }
+
+                if (attempt > 0) {
+                    let delay;
+                    if (state.settings.useFixedRetryDelay) {
+                        delay = state.settings.fixedRetryDelaySeconds * 1000;
+                    } else {
+                        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+                        const maxDelay = state.settings.maxBackoffDelaySeconds * 1000;
+                        delay = Math.min(exponentialDelay, maxDelay);
+                    }
+                    uiUtils.setLoadingIndicatorText(`翻訳エラー 再試行(${attempt}回目)... ${Math.round(delay/1000)}秒待機`);
+                    console.log(`翻訳APIリトライ ${attempt}: ${delay}ms待機...`);
+                    await interruptibleSleep(delay, state.abortController.signal);
+                }
+
+                if (attempt > 0) {
+                    uiUtils.setLoadingIndicatorText('思考プロセスの翻訳を再試行中...');
+                } else {
+                    uiUtils.setLoadingIndicatorText('思考プロセスを翻訳中...');
+                }
+
+                const timeoutController = new AbortController();
+                const timeoutId = setTimeout(() => timeoutController.abort(), 15000);
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody),
+                    signal: timeoutController.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    let errorBody = await response.text();
+                    try { errorBody = JSON.parse(errorBody); } catch(e) { /* ignore */ }
+                    console.error(`翻訳APIエラー (${response.status})`, errorBody);
+                    const error = new Error(`翻訳APIエラー (${response.status})`);
+                    error.status = response.status;
+                    throw error;
+                }
+
+                const responseData = await response.json();
+                if (responseData.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    const translatedText = responseData.candidates[0].content.parts[0].text;
+                    console.log("--- 翻訳処理成功 ---");
+                    return translatedText;
+                } else {
+                    console.warn("翻訳APIの応答形式が不正、またはコンテンツが空です。", responseData);
+                    if(responseData.promptFeedback) {
+                        console.warn("翻訳がブロックされた可能性があります:", responseData.promptFeedback);
+                    }
+                    throw new Error("翻訳APIの応答形式が不正です。");
+                }
+            } catch (error) {
+                lastError = error;
+                if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+                    if (state.abortController?.signal.aborted) {
+                        break;
+                    }
+                }
+                if (error.status && error.status >= 400 && error.status < 500) {
+                    console.error(`リトライ不可の翻訳エラー (ステータス: ${error.status})。`);
+                    break;
+                }
+                console.warn(`翻訳API呼び出し試行 ${attempt + 1} が失敗。`, error);
+            }
+        }
+
+        console.error("思考プロセスの翻訳中にエラーが発生しました。原文を返します。", lastError);
+        return textToTranslate;
     }
 };
 
@@ -2488,6 +2558,11 @@ const appLogic = {
         }
         elements.enableAutoRetryCheckbox.addEventListener('change', () => {
             elements.autoRetryOptionsDiv.classList.toggle('hidden', !elements.enableAutoRetryCheckbox.checked);
+        });
+        elements.useFixedRetryDelayCheckbox.addEventListener('change', () => {
+            const useFixed = elements.useFixedRetryDelayCheckbox.checked;
+            elements.fixedRetryDelayContainer.classList.toggle('hidden', !useFixed);
+            elements.maxBackoffDelayContainer.classList.toggle('hidden', useFixed);
         });
     },
 
@@ -3307,6 +3382,14 @@ const appLogic = {
             ]
         };
 
+        if (state.settings.applyDummyToProofread && state.settings.dummyUser) {
+            requestBody.contents.push({
+                role: 'user',
+                parts: [{ text: state.settings.dummyUser }]
+            });
+            console.log("校正リクエストにダミーUserプロンプトを適用しました。");
+        }
+
         console.log("校正APIへの送信データ:", JSON.stringify(requestBody, null, 2));
 
         let lastError = null;
@@ -3319,14 +3402,20 @@ const appLogic = {
                 }
 
                 if (attempt > 0) {
-                    const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
-                    // リトライ時にインジケーターのテキストを更新
-                    uiUtils.setLoadingIndicatorText(`校正エラー 再試行(${attempt}回目)... ${delay}ms待機`);
+                    let delay;
+                    if (state.settings.useFixedRetryDelay) {
+                        delay = state.settings.fixedRetryDelaySeconds * 1000;
+                    } else {
+                        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+                        const maxDelay = state.settings.maxBackoffDelaySeconds * 1000;
+                        delay = Math.min(exponentialDelay, maxDelay);
+                    }
+                    
+                    uiUtils.setLoadingIndicatorText(`校正エラー 再試行(${attempt}回目)... ${Math.round(delay/1000)}秒待機`);
                     console.log(`校正APIリトライ ${attempt}: ${delay}ms待機...`);
                     await interruptibleSleep(delay, state.abortController.signal);
                 }
 
-                // API通信中のステータスメッセージを設定
                 if (attempt === 0) {
                     uiUtils.setLoadingIndicatorText('校正中...');
                 } else if (attempt === 1) {
@@ -3861,7 +3950,8 @@ const appLogic = {
             thoughtTranslationModel: elements.thoughtTranslationModelSelect.value,
 
             dummyUser: elements.dummyUserInput.value.trim(),
-            dummyUser: elements.dummyUserInput.value.trim(),
+            applyDummyToProofread: elements.applyDummyToProofreadCheckbox.checked,
+            applyDummyToTranslate: elements.applyDummyToTranslateCheckbox.checked,
             dummyModel: elements.dummyModelInput.value.trim(),
             concatDummyModel: elements.concatDummyModelCheckbox.checked,
             additionalModels: elements.additionalModelsTextarea.value.trim(),
@@ -3876,6 +3966,9 @@ const appLogic = {
             enableSwipeNavigation: elements.swipeNavigationToggle.checked,
             enableAutoRetry: elements.enableAutoRetryCheckbox.checked,
             maxRetries: parseInt(elements.maxRetriesInput.value, 10) || 0,
+            useFixedRetryDelay: elements.useFixedRetryDelayCheckbox.checked,
+            fixedRetryDelaySeconds: parseInt(elements.fixedRetryDelayInput.value, 10) || 15,
+            maxBackoffDelaySeconds: parseInt(elements.maxBackoffDelayInput.value, 10) || 60,
             enableProofreading: elements.enableProofreadingCheckbox.checked,
             proofreadingModelName: elements.proofreadingModelNameSelect.value,
             proofreadingSystemInstruction: elements.proofreadingSystemInstructionTextarea.value.trim(),
@@ -3912,6 +4005,12 @@ const appLogic = {
         }
         if (isNaN(newSettings.maxRetries) || newSettings.maxRetries < 0) {
             newSettings.maxRetries = 0;
+        }
+        if (isNaN(newSettings.fixedRetryDelaySeconds) || newSettings.fixedRetryDelaySeconds < 0) {
+            newSettings.fixedRetryDelaySeconds = 15;
+        }
+        if (isNaN(newSettings.maxBackoffDelaySeconds) || newSettings.maxBackoffDelaySeconds < 0) {
+            newSettings.maxBackoffDelaySeconds = 60;
         }
 
         try {
@@ -4683,8 +4782,16 @@ const appLogic = {
                 }
 
                 if (attempt > 0) {
-                    const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
-                    uiUtils.setLoadingIndicatorText(`APIエラー 再試行(${attempt}回目)... ${delay}ms待機`);
+                    let delay;
+                    if (state.settings.useFixedRetryDelay) {
+                        delay = state.settings.fixedRetryDelaySeconds * 1000;
+                    } else {
+                        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+                        const maxDelay = state.settings.maxBackoffDelaySeconds * 1000;
+                        delay = Math.min(exponentialDelay, maxDelay);
+                    }
+
+                    uiUtils.setLoadingIndicatorText(`APIエラー 再試行(${attempt}回目)... ${Math.round(delay/1000)}秒待機`);
                     console.log(`API呼び出し失敗。${delay}ms後にリトライします... (試行 ${attempt + 1}/${maxRetries + 1})`);
                     await interruptibleSleep(delay, state.abortController.signal);
                 }
