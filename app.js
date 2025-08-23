@@ -6,7 +6,7 @@ const SETTINGS_STORE = 'settings';
 const CHATS_STORE = 'chats';
 const CHAT_UPDATEDAT_INDEX = 'updatedAtIndex';
 const CHAT_CREATEDAT_INDEX = 'createdAtIndex';
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gemini-2.5-pro';
 const DEFAULT_STREAMING_SPEED = 12;
 const DEFAULT_TEMPERATURE = 0.5;
 const DEFAULT_MAX_TOKENS = 4000;
@@ -191,7 +191,7 @@ const state = {
     settings: {
         apiKey: '',
         modelName: DEFAULT_MODEL,
-        streamingOutput: true,
+        streamingOutput: false,
         streamingSpeed: DEFAULT_STREAMING_SPEED,
         systemPrompt: '',
         temperature: null,
@@ -201,7 +201,7 @@ const state = {
         presencePenalty: null,
         frequencyPenalty: null,
         thinkingBudget: null,
-        includeThoughts: true,
+        includeThoughts: false,
         enableThoughtTranslation: true, // 思考プロセスの翻訳を有効にするか
         thoughtTranslationModel: 'gemini-2.5-flash-lite',
         dummyUser: '',
