@@ -12,11 +12,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <!-- CSSファイルを外部から読み込む -->
-    <link rel="stylesheet" href="style.css?v=0.4">
+    <link rel="stylesheet" href="style.css?v=0.41">
     <link rel="stylesheet" href="prism.css" />
     <script src="marked.js" defer></script>
-    <script src="function-calling.js?v=0.4" defer></script>
-    <script src="app.js?v=0.34" defer></script>
+    <script src="function-calling.js?v=0.41" defer></script>
+    <script src="app.js?v=0.41" defer></script>
 </head>
 <body>
     <div class="app-container">
@@ -549,7 +549,13 @@
         <span id="image-modal-close">×</span>
         <img id="image-modal-img" src="" alt="拡大画像">
     </div>
-
+        <!-- App Update Notification -->
+        <div id="update-notification" class="update-notification hidden">
+            <span>新しいバージョンが利用可能です。</span>
+            <button id="reload-for-update-btn">更新</button>
+        </div>
+    
     <script src="prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/" defer></script>
+
 </body>
 </html>
