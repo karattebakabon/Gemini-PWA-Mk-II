@@ -1,3 +1,235 @@
+// --- 共通ヘルパー関数 ---
+
+/**
+ * 画像アセットDBを操作するためのヘルパーオブジェクト
+ */
+ const assetDB = {
+    get: (name) => new Promise((resolve, reject) => {
+        if (!window.state || !window.state.db) return reject(new Error("データベースが初期化されていません。"));
+        const request = window.state.db.transaction('image_assets', 'readonly').objectStore('image_assets').get(name);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    }),
+    save: (asset) => new Promise((resolve, reject) => {
+        if (!window.state || !window.state.db) return reject(new Error("データベースが初期化されていません。"));
+        const request = window.state.db.transaction('image_assets', 'readwrite').objectStore('image_assets').put(asset);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    }),
+    delete: (name) => new Promise((resolve, reject) => {
+        if (!window.state || !window.state.db) return reject(new Error("データベースが初期化されていません。"));
+        const request = window.state.db.transaction('image_assets', 'readwrite').objectStore('image_assets').delete(name);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    }),
+    list: () => new Promise((resolve, reject) => {
+        if (!window.state || !window.state.db) return reject(new Error("データベースが初期化されていません。"));
+        const request = window.state.db.transaction('image_assets', 'readonly').objectStore('image_assets').getAllKeys();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    })
+};
+
+/**
+ * 画像Blobを受け取り、WebPに変換するヘルパー関数
+ * @param {Blob} originalBlob - 変換元の画像Blob
+ * @returns {Promise<Blob>} 変換後のWebP Blob、または変換に失敗した場合は元のBlob
+ */
+ function convertBlobToWebP(originalBlob) {
+    return new Promise((resolve, reject) => {
+        // FileReaderでBlobをData URLに変換
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+
+                // CanvasをWebP Blobに変換 (品質0.9)
+                canvas.toBlob((webpBlob) => {
+                    if (webpBlob) {
+                        console.log(`[WebP Converter] 変換成功: ${originalBlob.size} bytes -> ${webpBlob.size} bytes`);
+                        resolve(webpBlob);
+                    } else {
+                        // 変換に失敗した場合は元のBlobをそのまま返す
+                        console.warn("[WebP Converter] WebPへの変換に失敗しました。元の形式を使用します。");
+                        resolve(originalBlob);
+                    }
+                }, 'image/webp', 0.9);
+            };
+            img.onerror = () => {
+                console.error("[WebP Converter] 画像データの読み込みに失敗しました。");
+                // エラー時も元のBlobを返すことで処理を続行させる
+                resolve(originalBlob);
+            };
+            img.src = e.target.result;
+        };
+        reader.onerror = () => {
+            console.error("[WebP Converter] FileReaderでBlobの読み込みに失敗しました。");
+            // エラー時も元のBlobを返す
+            resolve(originalBlob);
+        };
+        reader.readAsDataURL(originalBlob);
+    });
+}
+
+
+/**
+ * メッセージオブジェクトから画像データをBlob形式で抽出するヘルパー
+ * 添付画像(attachments)と生成画像(imageIds)の両方に対応
+ * @param {object} message - 抽出元のメッセージオブジェクト
+ * @returns {Promise<Blob|null>} 画像のBlobオブジェクト、またはnull
+ */
+ async function extractImageBlobFromMessage(message) {
+    if (!message) return null;
+
+    // 優先順位1: ユーザーが添付した画像 (message.attachments) をチェック
+    if (message.attachments && message.attachments.length > 0) {
+        const imageAttachment = message.attachments.find(att => att.mimeType && att.mimeType.startsWith('image/'));
+        if (imageAttachment) {
+            // .file プロパティがBlob/Fileオブジェクトとして存在する場合、それを優先的に使用
+            if (imageAttachment.file instanceof Blob) {
+                 console.log(`[extractImageBlob] 添付ファイル (${imageAttachment.name}) からBlobを取得しました。`);
+                 return imageAttachment.file;
+            }
+            // .file がない場合 (インポートデータなど)、base64から復元を試みる
+            if (imageAttachment.base64Data && imageAttachment.mimeType) {
+                try {
+                    console.log(`[extractImageBlob] 添付ファイルのBase64データからBlobを復元します。`);
+                    return await window.appLogic.base64ToBlob(imageAttachment.base64Data, imageAttachment.mimeType);
+                } catch (e) {
+                    console.error("[extractImageBlob] Base64からのBlob復元に失敗:", e);
+                }
+            }
+        }
+    }
+
+    // 優先順位2: AIが生成した画像 (message.imageIds) をチェック
+    if (message.imageIds && message.imageIds.length > 0) {
+        const imageId = message.imageIds[0]; // 最初の画像IDを使用
+        console.log(`[extractImageBlob] 生成画像のID (${imageId}) を検出しました。DBからBlobを取得します。`);
+        if (window.appLogic && typeof window.appLogic.getImageBlobById === 'function') {
+            return await window.appLogic.getImageBlobById(imageId);
+        } else {
+            console.error("[extractImageBlob] appLogic.getImageBlobById が見つかりません。");
+            return null;
+        }
+    }
+    
+    console.log("[extractImageBlob] メッセージ内に参照可能な画像が見つかりませんでした。");
+    return null;
+}
+
+
+
+
+/**
+ * 画像アセットをIndexedDBに保存・管理する関数 (新アーキテクチャ対応)
+ * @param {object} args - AIによって提供される引数オブジェクト
+ * @param {string} args.action - "save", "get", "delete", "list", "delete_all" のいずれか
+ * @param {string} [args.asset_name] - 操作対象のアセット名
+ * @param {number} [args.source_image_message_index] - "save"時に使用。保存元画像のメッセージインデックス（0=直近）
+ * @param {object} chat - 現在のチャットデータ
+ * @returns {Promise<object>} 操作結果を含むオブジェクト
+ */
+ async function manage_image_assets({ action, asset_name, source_image_message_index }, chat) {
+    console.log(`[Function Calling] manage_image_assetsが呼び出されました。`, { action, asset_name, source_image_message_index });
+    
+    if (!action) {
+        return { error: "引数 'action' は必須です。" };
+    }
+    if (!['list', 'delete_all'].includes(action) && !asset_name) {
+        return { error: `アクション '${action}' には 'asset_name' が必須です。` };
+    }
+
+    try {
+        switch (action) {
+            case "save": {
+                if (typeof source_image_message_index !== 'number') {
+                    return { error: "アクション 'save' には 'source_image_message_index' が必須です。" };
+                }
+                
+                const messages = chat.messages || [];
+                const targetIndex = messages.length - 1 - source_image_message_index;
+
+                if (targetIndex < 0 || targetIndex >= messages.length) {
+                    return { error: `指定されたインデックス(${source_image_message_index})が無効です。履歴の範囲外です。` };
+                }
+                const targetMessage = messages[targetIndex];
+                if (!targetMessage) {
+                    return { error: `指定されたインデックス(${source_image_message_index})にメッセージが見つかりません。` };
+                }
+
+                const imageBlob = await extractImageBlobFromMessage(targetMessage);
+                if (!imageBlob) {
+                    return { error: `指定されたメッセージから保存可能な画像が見つかりませんでした。` };
+                }
+
+                // 取得したBlobをWebPに変換
+                const webpBlob = await convertBlobToWebP(imageBlob);
+
+                const newAsset = {
+                    name: asset_name,
+                    blob: webpBlob, // 変換後のBlobを保存
+                    createdAt: new Date()
+                };
+                await assetDB.save(newAsset);
+                return { success: true, message: `画像アセット「${asset_name}」をWebP形式で保存しました。` };
+            }
+            case "get": {
+                const asset = await assetDB.get(asset_name);
+                if (!asset) {
+                    return { success: false, message: `画像アセット「${asset_name}」は見つかりませんでした。` };
+                }
+                
+                const tempImageId = await window.appLogic.saveImageBlob(asset.blob);
+
+                return {
+                    success: true,
+                    message: `画像アセット「${asset_name}」を取得しました。`,
+                    _internal_ui_action: {
+                        type: "display_generated_images",
+                        imageIds: [tempImageId]
+                    }
+                };
+            }
+            case "delete": {
+                await assetDB.delete(asset_name);
+                return { success: true, message: `画像アセット「${asset_name}」を削除しました。` };
+            }
+            case "list": {
+                const keys = await assetDB.list();
+                return { success: true, count: keys.length, asset_names: keys };
+            }
+            case "delete_all": {
+                const keys = await assetDB.list();
+                const count = keys.length;
+                if (count === 0) {
+                    return { success: true, message: "削除する画像アセットはありませんでした。" };
+                }
+                await new Promise((resolve, reject) => {
+                    const request = window.state.db.transaction('image_assets', 'readwrite').objectStore('image_assets').clear();
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+                return { success: true, message: `${count}件の画像アセットをすべて削除しました。` };
+            }
+            default:
+                return { error: `無効なアクションです: ${action}` };
+        }
+    } catch (error) {
+        console.error(`[Function Calling] manage_image_assetsでエラーが発生しました:`, error);
+        return { error: `内部エラーが発生しました: ${error.message}` };
+    }
+}
+
+
+
+
+
 /**
  * 現在のチャットセッションに紐づく永続メモリを管理する関数
  * @param {object} args - AIによって提供される引数オブジェクト
@@ -421,8 +653,6 @@ async function manage_flags({ action, key, value, ttl_minutes }, chat) { // chat
       if (typeof ttl_minutes === 'number' && ttl_minutes > 0) {
           // TTLの処理はDB保存と分離するため、ここではメッセージ追加のみ
           message += ` (${ttl_minutes}分後に自動消滅します)`;
-          // 注意: このリファクタリングにより、実際のTTLタイマー機能は別途実装が必要になります。
-          // 今回はデータ整合性の問題を優先して修正します。
       }
       const result = { success: true, key, old_value: currentValue, new_value: newValue, message };
       console.log(`[Function Calling] 処理完了:`, result);
@@ -761,57 +991,59 @@ async function generate_random_string({ length, count = 1, use_uppercase = true,
  * @param {string} args.query - 検索キーワードまたは質問文
  * @returns {Promise<object>} 検索結果の要約またはエラー情報を含むオブジェクトを返すPromise
  */
- async function search_web({ query }) {
-  console.log(`[Function Calling] search_webが呼び出されました。`, { query });
-
-  const apiKey = state.settings.googleSearchApiKey;
-  const engineId = state.settings.googleSearchEngineId;
-
-  if (!apiKey || !engineId) {
-      return { error: "Web検索機能を利用するには、設定画面でGoogle Search APIキーと検索エンジンIDの両方を設定する必要があります。" };
-  }
-  if (!query) {
-      return { error: "検索クエリ(query)は必須です。" };
-  }
-
-  const endpoint = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${engineId}&q=${encodeURIComponent(query)}`;
-
-  try {
-      const response = await fetch(endpoint);
-      if (!response.ok) {
-          const errorData = await response.json();
-          const errorMessage = errorData.error?.message || `HTTPエラー: ${response.status}`;
-          console.error(`[Function Calling] search_web APIエラー:`, errorMessage);
-          return { error: `Web検索APIでエラーが発生しました: ${errorMessage}` };
-      }
-
-      const data = await response.json();
-
-      if (!data.items || data.items.length === 0) {
-          return { success: true, message: "検索結果が見つかりませんでした。", results: [] };
-      }
-
-      const results = data.items.slice(0, 5).map(item => ({ // 上位5件に絞る
-          title: item.title,
-          link: item.link,
-          snippet: item.snippet
-      }));
-
-      // AIが扱いやすいように、結果を一つの文字列にまとめる
-      let summary = `Web検索結果の要約:\n\n`;
-      results.forEach((result, index) => {
-          summary += `[${index + 1}] ${result.title}\n`;
-          summary += `抜粋: ${result.snippet}\n`;
-          summary += `URL: ${result.link}\n\n`;
-      });
-
-      return { success: true, summary: summary.trim(), results: results };
-
-  } catch (error) {
-      console.error(`[Function Calling] search_webで予期せぬエラー:`, error);
-      return { error: `Web検索中に予期せぬエラーが発生しました: ${error.message}` };
-  }
+async function search_web({ query }) {
+    console.log(`[Function Calling] search_webが呼び出されました。`, { query });
+  
+    const apiKey = state.settings.googleSearchApiKey;
+    const engineId = state.settings.googleSearchEngineId;
+  
+    if (!apiKey || !engineId) {
+        return { error: "Web検索機能を利用するには、設定画面でGoogle Search APIキーと検索エンジンIDの両方を設定する必要があります。" };
+    }
+    if (!query) {
+        return { error: "検索クエリ(query)は必須です。" };
+    }
+  
+    const endpoint = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${engineId}&q=${encodeURIComponent(query)}`;
+  
+    try {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+            const errorData = await response.json();
+            const errorMessage = errorData.error?.message || `HTTPエラー: ${response.status}`;
+            console.error(`[Function Calling] search_web APIエラー:`, errorMessage);
+            return { error: `Web検索APIでエラーが発生しました: ${errorMessage}` };
+        }
+  
+        const data = await response.json();
+  
+        if (!data.items || data.items.length === 0) {
+            return { success: true, summary: "検索結果が見つかりませんでした。", search_results: [] };
+        }
+  
+        const results = data.items.slice(0, 5).map(item => ({
+            title: item.title,
+            link: item.link,
+            snippet: item.snippet
+        }));
+  
+        // AI向けのプレーンテキスト要約を作成
+        let summary = `Web検索結果の要約:\n\n`;
+        results.forEach((result, index) => {
+            summary += `[${index + 1}] ${result.title}\n`;
+            summary += `抜粋: ${result.snippet}\n`;
+            summary += `URL: ${result.link}\n\n`;
+        });
+  
+        // AI向けの要約と、UI向けのリンク配列の両方を返す
+        return { success: true, summary: summary.trim(), search_results: results };
+  
+    } catch (error) {
+        console.error(`[Function Calling] search_webで予期せぬエラー:`, error);
+        return { error: `Web検索中に予期せぬエラーが発生しました: ${error.message}` };
+    }
 }
+
 /**
  * キャラクターの口調や一人称などのスタイルプロファイルを管理します。
  * @param {object} args - AIによって提供される引数オブジェクト
@@ -870,7 +1102,600 @@ async function manage_style_profile({ action, character_name, profile_name, over
   }
 }
 
+/**
+ * UIの透明度（オーバーレイ、メッセージバブル）を動的に変更します。
+ * @param {object} args - AIによって提供される引数オブジェクト
+ * @param {number} [args.overlay] - チャット画面背景のオーバーレイの濃さ (0.0で透明, 1.0で不透明)
+ * @param {number} [args.message_bubble] - メッセージ吹き出しの濃さ (0.1でほぼ透明, 1.0で不透明)
+ * @returns {Promise<object>} 操作結果を含むオブジェクトを返すPromise
+ */
+async function set_ui_opacity({ overlay, message_bubble }) {
+    console.log(`[Function Calling] set_ui_opacityが呼び出されました。`, { overlay, message_bubble });
+
+    if (window.state && window.state.settings.allowPromptUiChanges === false) {
+        return { error: "ユーザー設定により、プロンプトによるUIの変更は許可されていません。" };
+    }
+
+    const newOpacities = {};
+    const changedItems = [];
+    if (typeof overlay === 'number') {
+        newOpacities.overlay = Math.min(1.0, Math.max(0.0, overlay));
+        changedItems.push(`オーバーレイの濃さを${Math.round(newOpacities.overlay * 100)}%に`);
+    }
+    if (typeof message_bubble === 'number') {
+        newOpacities.message_bubble = Math.min(1.0, Math.max(0.1, message_bubble));
+        changedItems.push(`メッセージバブルの濃さを${Math.round(newOpacities.message_bubble * 100)}%に`);
+    }
+
+    if (Object.keys(newOpacities).length === 0) {
+        return { error: "変更する透明度の指定（overlayまたはmessage_bubble）がありません。" };
+    }
+
+    if (window.appLogic && typeof window.appLogic.updateOpacitySettings === 'function') {
+        const success = await window.appLogic.updateOpacitySettings(newOpacities);
+        if (success) {
+            const message = `${changedItems.join('、')}変更しました。`;
+            return { success: true, message: message };
+        } else {
+            return { error: "有効な値が指定されなかったため、UIは変更されませんでした。" };
+        }
+    } else {
+        return { error: "UI更新機能の呼び出しに失敗しました。" };
+    }
+}
+
+/**
+ * チャット画面の背景画像をURLから設定します。この変更は一時的なもので、リロードすると元に戻ります。
+ * @param {object} args - AIによって提供される引数オブジェクト
+ * @param {string} args.image_url - 表示したい画像のURL
+ * @returns {Promise<object>} 操作結果を含むオブジェクトを返すPromise
+ */
+ async function set_background_image({ image_url, asset_name }) {
+    console.log(`[Function Calling] set_background_imageが呼び出されました。`, { image_url, asset_name });
+
+    if (window.state && window.state.settings.allowPromptUiChanges === false) {
+        return { error: "ユーザー設定により、プロンプトによるUIの変更は許可されていません。" };
+    }
+
+    let final_image_url = null;
+
+    try {
+        if (asset_name) {
+            const asset = await assetDB.get(asset_name);
+            if (!asset || !asset.blob) {
+                return { error: `画像アセット「${asset_name}」が見つかりませんでした。` };
+            }
+            // Blobから一時的なオブジェクトURLを生成
+            final_image_url = URL.createObjectURL(asset.blob);
+        } else if (image_url) {
+            final_image_url = image_url;
+        } else {
+            return { error: "引数 'image_url' または 'asset_name' のどちらか一方は必須です。" };
+        }
+
+        if (window.appLogic && typeof window.appLogic.applyBackgroundImageFromUrl === 'function') {
+            const result = await window.appLogic.applyBackgroundImageFromUrl(final_image_url);
+            // URLの解放処理は呼び出し先のapp.jsに一任するため、ここでは何もしない
+            return result;
+        } else {
+
+            return { error: "UI更新機能の呼び出しに失敗しました。" };
+        }
+    } catch (error) {
+        console.error(`[Function Calling] set_background_imageでエラーが発生しました:`, error);
+        return { error: `背景画像の設定中に内部エラーが発生しました: ${error.message}` };
+    }
+}
+
+
+/**
+ * 背景画像の上にキャラクター画像を重ねて、一つの画像としてメッセージに表示します。
+ * @param {object} args - AIによって提供される引数オブジェクト
+ * @param {string} args.character_url - 前景に表示するキャラクター画像のURL（必須）
+ * @param {string} [args.background_url] - 背景画像のURL。指定しない場合、現在のチャット背景が使われます。
+ * @returns {Promise<object>} 操作結果を含むオブジェクトを返すPromise
+ */
+ async function display_layered_image({ character_url, background_url }) {
+    console.log(`[Function Calling] display_layered_imageが呼び出されました。`, { character_url, background_url });
+
+    if (window.state && window.state.settings.allowPromptUiChanges === false) {
+        return { error: "ユーザー設定により、プロンプトによるUIの変更は許可されていません。" };
+    }
+    if (!character_url || typeof character_url !== 'string') {
+        return { error: "引数 'character_url' は必須です。" };
+    }
+
+    const imageData = {
+        character_url,
+        background_url: background_url || null,
+    };
+
+    return { 
+        success: true, 
+        message: "画像合成の描画をリクエストしました。",
+        _internal_ui_action: {
+            type: "display_layered_image",
+            data: imageData
+        }
+    };
+}
+
+/**
+ * テキストや画像から Veo3 を使用して動画を生成する（公式SDKによる本番実装）
+ * - Gemini API エンドポイント向け（veo-3.0-generate-preview）
+ * - i2v/t2vで personGeneration を自動フォールバック
+ * - aspectRatio は Gemini API では 16:9 のみ想定 → 強制丸め
+ * @param {object} args
+ * @param {string} args.prompt                - 英語のプロンプト（必須）
+ * @param {string} [args.negative_prompt]     - ネガティブプロンプト
+ * @param {string} [args.aspect_ratio="16:9"] - 希望アスペクト比（Gemini APIでは16:9に丸め）
+ * @param {number} [args.source_image_message_index] - 元画像のメッセージインデックス（0=直近）
+ * @param {{mimeType:string,data:string}} [args.source_inline_image] - 直近リクエストから渡す生画像（base64）
+ * @param {object} chat - 現在のチャットデータ
+ * @returns {Promise<object>} { success, message, video_url, video_base64 } | { success: false, error: { message, code } }
+ */
+ async function generate_video(
+    { prompt, negative_prompt, aspect_ratio = "16:9", source_image_message_index, source_inline_image },
+    chat
+  ) {
+    console.log(`[Function Calling] generate_video (SDK実装) が呼び出されました。`, {
+      prompt, negative_prompt, aspect_ratio, source_image_message_index, hasInline: !!source_inline_image
+    });
+  
+    const apiKey = window.state?.settings?.apiKey;
+    if (!apiKey) return { success: false, error: { message: "APIキーが設定されていません。" } };
+    if (typeof window.GoogleGenAI === 'undefined') return { success: false, error: { message: "Google Gen AI SDK (@google/genai) が読み込まれていません。" } };
+    if (!prompt || !String(prompt).trim()) return { success: false, error: { message: "prompt が空です。" } };
+  
+    // ローディングUI
+    if (window.uiUtils) {
+      window.uiUtils.setLoadingIndicatorText('動画生成中...');
+      window.elements.loadingIndicator.classList.remove('hidden');
+    }
+  
+    try {
+      const genAI = new window.GoogleGenAI({ apiKey });
+  
+      const safeAspect = "16:9";
+  
+      const request = { model: "veo-3.0-generate-preview", prompt, config: {} };
+      if (negative_prompt) request.config.negativePrompt = negative_prompt;
+      request.config.aspectRatio = safeAspect;
+  
+      // 1) inline 指定があれば優先
+      if (source_inline_image && source_inline_image.data) {
+        // 内部ヘルパーの代わりに appLogic を使用
+        const base64Data = source_inline_image.data.replace(/\s+/g, "");
+        if (base64Data) {
+            request.image = {
+                imageBytes: base64Data,
+                mimeType: source_inline_image.mimeType || "image/png"
+            };
+            console.log(`画像をリクエストに追加 (direct inlineData).`);
+        }
+      }
+  
+        // 2) まだ無ければ履歴から抽出 (chat.messages を直接使用)
+        if (!request.image && typeof source_image_message_index === 'number') {
+            const messages = chat.messages || [];
+            // AIが渡すインデックス(0=最新)を、配列の末尾から数える正しいインデックスに変換
+            const targetIndex = messages.length - 1 - source_image_message_index;
+    
+            if (targetIndex < 0 || targetIndex >= messages.length) {
+                throw new Error(`指定されたメッセージ(インデックス: ${source_image_message_index})が見つかりません。インデックスが範囲外です。`);
+    
+        }
+        const targetMessage = messages[targetIndex];
+        if (!targetMessage) {
+            throw new Error(`指定されたインデックス(${source_image_message_index})にメッセージが見つかりません。`);
+        }
+
+        // グローバルで修正済みの extractImageBlobFromMessage を使用
+        const imageBlob = await extractImageBlobFromMessage(targetMessage);
+
+        if (imageBlob) {
+            const base64Data = await window.appLogic.fileToBase64(imageBlob);
+            request.image = {
+                imageBytes: base64Data,
+                mimeType: imageBlob.type || "image/png"
+            };
+            console.log(`画像をリクエストに追加 (index: ${source_image_message_index}).`);
+        } else {
+            throw new Error(`指定されたメッセージ(インデックス: ${source_image_message_index})から有効な画像が見つかりませんでした。`);
+        }
+    }
+  
+      if (request.image) {
+        request.config.personGeneration = "allow_adult";
+      }
+  
+      const imgHead = (request.image?.imageBytes || "").slice(0, 50);
+      console.log("SDK経由で動画生成開始リクエストを送信します:", {
+        model: request.model,
+        config: request.config,
+        hasImage: !!request.image,
+        image: request.image ? { mimeType: request.image.mimeType, imageBytesPreview: imgHead ? imgHead + "..." : "(none)" } : undefined
+      });
+  
+      async function tryGenerate(genAI, req) {
+        try {
+          return await genAI.models.generateVideos(req);
+        } catch (e) {
+          const msg = (e?.error?.message || e?.message || "").toLowerCase();
+          const isPG = /persongeneration|use case|not supported/.test(msg);
+          if (!isPG) throw e;
+  
+          const hasImage = !!req.image;
+  
+          if (!hasImage) {
+            if (!req.config.personGeneration) {
+              req.config.personGeneration = "allow_all";
+              return await genAI.models.generateVideos(req);
+            } else if (req.config.personGeneration === "allow_all") {
+              req.config.personGeneration = "allow_adult";
+              return await genAI.models.generateVideos(req);
+            }
+          } else {
+            if (req.config.personGeneration === "allow_adult") {
+              req.config.personGeneration = "allow_all";
+              return await genAI.models.generateVideos(req);
+            }
+          }
+          throw e;
+        }
+      }
+  
+      let operation = await tryGenerate(genAI, request);
+      console.log("動画生成リクエストを受け付けました。Operation:", operation);
+  
+      const MAX_ATTEMPTS = 18;
+      let attempts = 0;
+      while (!operation.done) {
+        attempts++;
+        if (attempts > MAX_ATTEMPTS) throw new Error("動画生成がタイムアウトしました（3分）。");
+        console.log(`動画生成の状態を確認中... (${attempts}/${MAX_ATTEMPTS})`);
+        await new Promise(r => setTimeout(r, 10000));
+        operation = await genAI.operations.getVideosOperation({ operation });
+        if (operation.error) throw new Error(`動画生成処理でエラーが発生しました: ${operation.error.message}`);
+      }
+  
+      console.log("動画生成が完了しました。", operation);
+  
+      const resp = operation?.response ?? {};
+      const fileRef =
+        resp.generatedVideos?.[0]?.video ||
+        resp.generateVideoResponse?.generatedSamples?.[0]?.video ||
+        resp.generatedSamples?.[0]?.video || null;
+  
+      if (!fileRef) {
+        console.error("Operation response:", resp);
+        throw new Error("動画参照が見つかりませんでした。（generatedVideos / generatedSamples のどちらにも video が無い）");
+      }
+  
+      let downloadUrl = fileRef.uri || null;
+      if (!downloadUrl && fileRef.name) {
+        downloadUrl = `https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(fileRef.name)}:download`;
+      }
+      if (!downloadUrl) {
+        console.error("fileRef:", fileRef);
+        throw new Error("動画のダウンロードURLを特定できませんでした。（uri も name も無し）");
+      }
+  
+      const res = await fetch(`${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}key=${apiKey}`, {
+        method: 'GET',
+        redirect: 'follow'
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        const error = new Error(`動画ダウンロードに失敗: ${res.status} ${res.statusText} ${t}`);
+        error.status = res.status;
+        throw error;
+      }
+  
+      const videoBlob = await res.blob();
+      const videoUrl = URL.createObjectURL(videoBlob);
+
+      // BlobをBase64に変換するヘルパーを appLogic から呼び出す
+      const videoBase64 = await window.appLogic.fileToBase64(videoBlob);
+      console.log("動画のBlob URLとBase64データを生成しました。");
+  
+      return {
+        success: true,
+        message: "動画を生成しました。",
+        _internal_ui_action: {
+            type: "display_generated_videos",
+            videos: [{
+                url: videoUrl,
+                base64Data: videoBase64,
+                prompt: prompt
+            }]
+        }
+      };
+
+    } catch (error) {
+      console.error(`[Function Calling] generate_videoでエラーが発生しました:`, error);
+      return { 
+          success: false, 
+          error: { 
+              message: error.message || String(error), 
+              code: error.status || error.code
+          } 
+      };
+    } finally {
+      if (window.uiUtils) window.elements.loadingIndicator.classList.add('hidden');
+    }
+}
+
+
+
+  
+
+/**
+ * generate_image
+ * 画像「生成」専用（編集は非対応）。Function Calling から呼び出される前提。
+ * - プロンプトは英語で渡すこと（内部翻訳は行わない）。
+ * - モデルはユーザー明示指定が最優先。無指定なら ultra/fast/standard を簡易判定。
+ * - personGeneration は "allow_all" を固定（※地域制限に留意）。
+ *
+ * @param {Object} args
+ * @param {string} args.prompt             - 英語プロンプト（必須）
+ * @param {string} [args.model]            - 明示モデル指定（"imagen-4.0-generate-001" | "imagen-4.0-ultra-generate-001" | "imagen-4.0-fast-generate-001" | "gemini-2.5-flash-image-preview"）
+ * @param {number} [args.numberOfImages=1] - 1〜4
+ * @param {string} [args.sampleImageSize]  - "1K" | "2K"（Standard/Ultraのみ）
+ * @param {string} [args.aspectRatio]      - "1:1" | "3:4" | "4:3" | "9:16" | "16:9"
+ *
+ * @returns {Promise<object>} 処理結果
+ */
+async function generate_image(args = {}) {
+    const ai = (window.ai instanceof GoogleGenAI)
+      ? window.ai
+      : new GoogleGenAI({ apiKey: (window.state?.settings?.apiKey || window.GEMINI_API_KEY) });
+  
+    const {
+      prompt,
+      model: userModel,
+      numberOfImages = 1,
+      sampleImageSize = "1K",
+      aspectRatio = "1:1",
+    } = args || {};
+  
+    if (!prompt || typeof prompt !== "string") {
+      return { success: false, error: { message: "prompt は必須です（英語で渡してください）。" } };
+    }
+  
+    function pickModel() {
+      if (userModel) return userModel;
+      const p = prompt.toLowerCase();
+      const complexHints = ["panorama", "wide", "isometric", "crowd", "complex", "intricate", "many", "detailed composition", "epic", "landscape", "cityscape", "aerial"];
+      const simpleHints  = ["icon", "logo", "flat", "pattern", "sticker", "emoji", "solid background", "simple", "minimal"];
+      const isComplex = complexHints.some(h => p.includes(h));
+      const isSimple  = simpleHints.some(h => p.includes(h));
+      if (isComplex) return "imagen-4.0-ultra-generate-001";
+      if (isSimple)  return "imagen-4.0-fast-generate-001";
+      return "imagen-4.0-generate-001";
+    }
+  
+    let modelName = pickModel();
+  
+    try {
+      let generatedImagesBase64 = [];
+      let responseMeta = {};
+  
+      if (modelName === "gemini-2.5-flash-image-preview") {
+        const resp = await ai.models.generateContent({
+          model: "gemini-2.5-flash-image-preview",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+        });
+        
+        const gen = resp?.candidates?.[0]?.content?.parts || [];
+        for (const part of gen) {
+          if (part?.inlineData?.mimeType?.startsWith("image/") && part?.inlineData?.data) {
+            generatedImagesBase64.push({ mimeType: part.inlineData.mimeType, data: part.inlineData.data });
+          }
+        }
+        responseMeta = { modelUsed: modelName, prompt, numberOfImages: generatedImagesBase64.length };
+  
+      } else {
+        const commonConfig = {
+          numberOfImages: Math.min(Math.max(Number(numberOfImages) || 1, 1), 4),
+          aspectRatio,
+          sampleImageSize,
+          personGeneration: "allow_all",
+        };
+  
+        const resp = await ai.models.generateImages({
+          model: modelName,
+          prompt,
+          config: commonConfig,
+        });
+  
+        for (const g of (resp?.generatedImages || [])) {
+          const bytes = g?.image?.imageBytes;
+          if (bytes) generatedImagesBase64.push({ mimeType: "image/png", data: bytes });
+        }
+        responseMeta = { ...commonConfig, modelUsed: modelName, prompt, numberOfImages: generatedImagesBase64.length };
+      }
+  
+      if (generatedImagesBase64.length === 0) {
+          return { success: false, error: { message: "APIからの応答に画像データが含まれていませんでした。" } };
+      }
+  
+      // 新しい画像保存ロジック
+      const imageIds = [];
+      for (const imgData of generatedImagesBase64) {
+          const imageBlob = await window.appLogic.base64ToBlob(imgData.data, imgData.mimeType);
+          const newImageId = await window.appLogic.saveImageBlob(imageBlob);
+          imageIds.push(newImageId);
+      }
+
+      return {
+        success: true,
+        message: `${imageIds.length}枚の画像の生成と保存に成功しました。`,
+        _internal_ui_action: {
+            type: "display_generated_images",
+            imageIds: imageIds // base64の代わりにimageIdsを返す
+        },
+        meta: responseMeta
+      };
+  
+    } catch (err) {
+      console.error("[generate_image] error object:", err);
+      let errorMessage = "An unknown error occurred.";
+      if (err.message) errorMessage = err.message;
+      if (err.cause?.error?.message) errorMessage = err.cause.error.message;
+      else if (err.errorDetails?.message) errorMessage = err.errorDetails.message;
+      
+      return { 
+          success: false, 
+          error: { message: `画像生成APIでエラーが発生しました: ${errorMessage}`, code: err?.status || err?.code } 
+      };
+    }
+}
+
+
+/**
+ * 既存の画像を、テキストプロンプトに基づいて編集します。
+ * @param {object} args
+ * @param {string} args.prompt - 英語の編集指示プロンプト（必須）
+ * @param {Array<object>} args.source_images - 編集元となる画像のソースを指定する配列
+ * @param {object} chat - 現在のチャットデータ
+ * @returns {Promise<object>} 処理結果
+ */
+ async function edit_image({ prompt, source_images }, chat) {
+    // ▼▼▼ デバッグ用ログ出力コード。また出番があったらつかう。 ▼▼▼
+    /*
+    console.log("--- [DEBUG] edit_image が受け取った chat オブジェクト ---");
+    console.log("受け取ったメッセージの総数:", chat.messages ? chat.messages.length : 0);
+    console.log("ダミープロンプトの数:", chat.dummy_prompt_count || 0);
+    if (chat.messages && chat.messages.length > 0) {
+        console.table(chat.messages.map(m => ({ 
+            role: m.role, 
+            content: (typeof m.content === 'string') ? m.content.substring(0, 50) + '...' : '(コンテンツなし)',
+            attachments: m.attachments?.length || 0,
+            imageIds: m.imageIds?.length || 0
+        })));
+    }
+    console.log("--- [DEBUG] ログここまで ---");
+    */
+
+    console.log(`[Function Calling] edit_imageが呼び出されました。`, { prompt, source_images });
+
+    const apiKey = window.state?.settings?.apiKey;
+    if (!apiKey) return { error: "APIキーが設定されていません。" };
+    if (typeof window.GoogleGenAI === 'undefined') return { error: "Google Gen AI SDK (@google/genai) が読み込まれていません。" };
+    if (!prompt || typeof prompt !== 'string') return { error: "引数 'prompt' は必須です。" };
+    if (!Array.isArray(source_images) || source_images.length === 0) {
+        return { error: "引数 'source_images' は必須であり、少なくとも1つの画像ソースを含む配列である必要があります。" };
+    }
+
+    try {
+        const ai = (window.ai instanceof GoogleGenAI)
+            ? window.ai
+            : new GoogleGenAI({ apiKey });
+        
+        const imageParts = [];
+
+        for (const source of source_images) {
+            let imageBlob = null;
+            if (typeof source.message_index === 'number') {
+                const messages = chat.messages || [];
+
+                // AIが指定したインデックスをそのまま使用する
+                const targetIndex = messages.length - 1 - source.message_index;
+
+                if (targetIndex < 0 || targetIndex >= messages.length) {
+                    throw new Error(`指定されたメッセージ(インデックス: ${source.message_index})が無効です。履歴の範囲外です。`);
+                }
+                const targetMessage = messages[targetIndex];
+
+                if (!targetMessage) throw new Error(`指定されたインデックス(${source.message_index})にメッセージが見つかりません。`);
+                imageBlob = await extractImageBlobFromMessage(targetMessage);
+                if (!imageBlob) throw new Error(`指定されたメッセージ(インデックス: ${source.message_index})から画像が見つかりません。`);
+
+            } else if (typeof source.asset_name === 'string') {
+                const asset = await assetDB.get(source.asset_name);
+                if (!asset || !asset.blob) throw new Error(`画像アセット「${source.asset_name}」が見つかりません。`);
+                imageBlob = asset.blob;
+            }
+
+            if (imageBlob) {
+                const base64Data = await window.appLogic.fileToBase64(imageBlob);
+                imageParts.push({
+                    inlineData: {
+                        mimeType: imageBlob.type || 'image/png',
+                        data: base64Data
+                    }
+                });
+            }
+        }
+
+        if (imageParts.length === 0) {
+            return { error: "編集対象の有効な画像ソースが見つかりませんでした。" };
+        }
+
+        // 画像パーツの配列に、テキストプロンプトも追加する
+        imageParts.push({ text: prompt });
+
+        const resp = await ai.models.generateContent({
+            model: "gemini-2.5-flash-image-preview",
+            contents: imageParts
+        });
+
+        const editedImagesBase64 = [];
+        const gen = resp?.candidates?.[0]?.content?.parts || [];
+        for (const part of gen) {
+            if (part?.inlineData?.mimeType?.startsWith("image/") && part?.inlineData?.data) {
+                editedImagesBase64.push({
+                    mimeType: part.inlineData.mimeType,
+                    data: part.inlineData.data
+                });
+            }
+        }
+
+        if (editedImagesBase64.length === 0) {
+            return { success: false, error: { message: "画像の編集に失敗しました。APIからの応答に画像が含まれていません。" } };
+        }
+
+        const imageIds = [];
+        for (const imgData of editedImagesBase64) {
+            const imageBlob = await window.appLogic.base64ToBlob(imgData.data, imgData.mimeType);
+            const newImageId = await window.appLogic.saveImageBlob(imageBlob);
+            imageIds.push(newImageId);
+        }
+
+        return {
+            success: true,
+            message: "画像の編集と保存に成功しました。",
+            _internal_ui_action: {
+                type: "display_generated_images",
+                imageIds: imageIds
+            },
+            meta: {
+                modelUsed: "gemini-2.5-flash-image-preview",
+                prompt,
+                numberOfImages: imageIds.length
+            }
+        };
+
+    } catch (err) {
+        console.error("[edit_image] error object:", err);
+        let errorMessage = "An unknown error occurred.";
+        if (err.message) errorMessage = err.message;
+        
+        return { 
+            success: false, 
+            error: { 
+                message: `画像編集でエラーが発生しました: ${errorMessage}`, 
+                code: err?.status || err?.code 
+            } 
+        };
+    }
+}
+
+
+
 window.functionCallingTools = {
+  manage_image_assets: manage_image_assets,
   calculate: async function({ expression }) {
     console.log(`[Function Calling] calculateが呼び出されました。式: ${expression}`);
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -907,7 +1732,13 @@ window.functionCallingTools = {
   get_random_choice: get_random_choice,
   generate_random_string: generate_random_string,
   search_web: search_web,
-  manage_style_profile: manage_style_profile
+  manage_style_profile: manage_style_profile,
+  set_ui_opacity: set_ui_opacity,
+  set_background_image: set_background_image,
+  display_layered_image: display_layered_image,
+  generate_video: generate_video,
+  generate_image: generate_image,
+  edit_image: edit_image
 };
 
 
@@ -918,6 +1749,28 @@ window.functionCallingTools = {
 window.functionDeclarations = [
   {
       "function_declarations": [
+          {
+            "name": "manage_image_assets",
+            "description": "ユーザーが提供した画像を、後から再利用できるように名前を付けてアプリ内に永続的に保存・管理します。キャラクターの立ち絵や背景など、繰り返し使用する画像を保存するのに使用します。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "action": {
+                        "type": "STRING",
+                        "description": "実行する操作を選択します。'save': 画像を保存/上書き, 'get': 保存済み画像を取得して表示, 'delete': 画像を削除, 'list': 保存されている全画像の名前を一覧表示。 'delete_all': 保存されている全ての画像を削除。"
+                    },
+                    "asset_name": {
+                        "type": "STRING",
+                        "description": "画像を識別するための一意の名前。'list'アクション以外では必須です。例: 'キャラAの立ち絵', '森の背景'"
+                    },
+                    "source_image_message_index": {
+                        "type": "NUMBER",
+                        "description": "'save'アクション時に必須。保存元となる画像が含まれるメッセージのインデックス番号。ユーザーの現在のプロンプトが0、その一つ前のAIの応答が1となります。"
+                    }
+                },
+                "required": ["action"]
+            }
+          },
           {
               "name": "calculate",
               "description": "ユーザーから与えられた数学的な計算式（四則演算）を評価し、その正確な結果を返します。複雑な計算や、信頼性が求められる計算の場合に必ず使用してください。",
@@ -1299,7 +2152,159 @@ window.functionDeclarations = [
                 },
                 "required": ["action"]
             }
-          }
+          },
+          {
+            "name": "set_ui_opacity",
+            "description": "チャット画面のUI要素の透明度を変更し、物語の雰囲気を演出します。例えば、回想シーンで全体を白っぽくしたり、緊迫した場面で暗くしたりできます。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "overlay": {
+                        "type": "NUMBER",
+                        "description": "背景画像上のオーバーレイの濃さ。0.0（完全に透明）から1.0（完全に不透明）の間の数値で指定します。"
+                    },
+                    "message_bubble": {
+                        "type": "NUMBER",
+                        "description": "メッセージ吹き出しの濃さ。0.1（ほぼ透明）から1.0（完全に不透明）の間の数値で指定します。"
+                    }
+                }
+            }
+          },
+          {
+            "name": "set_background_image",
+            "description": "チャット画面の背景画像を、指定されたURLまたは保存済みのアセット名から変更します。どちらか一方の引数を指定してください。画像URLに指定出来るのはユーザーがプロンプトで指定したURLのみです。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "image_url": {
+                        "type": "STRING",
+                        "description": "表示したい画像の完全なURL。例: 'https://example.com/images/scene1.png'"
+                    },
+                    "asset_name": {
+                        "type": "STRING",
+                        "description": "表示したい保存済み画像アセットの名前。例: '森の背景'"
+                    }
+                }
+            }
+          },
+          {
+            "name": "display_layered_image",
+            "description": "キャラクター画像に背景を付けて、一枚の絵のようにメッセージとして表示します。キャラクターの立ち絵と背景を組み合わせたシーン描写に使用します。重要：この関数を呼び出した後は、その結果を使ってユーザーへの最終的な応答メッセージを生成し、会話を完了させてください。応答メッセージ内には、生成した画像を埋め込む場所を示す `[IMAGE_HERE]` という目印を必ず配置してください。画像URLに指定出来るのはユーザーがプロンプトで指定したURLのみです。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "character_url": {
+                        "type": "STRING",
+                        "description": "前景に表示するキャラクター画像のURL。この画像のサイズと縦横比が表示の基準になります。"
+                    },
+                    "background_url": {
+                        "type": "STRING",
+                        "description": "背景として表示する画像のURL。指定しない場合、現在のチャット全体の背景画像が自動的に使用されます。"
+                    }
+                },
+                "required": ["character_url"]
+            }
+          },
+          {
+            "name": "generate_video",
+            "description": "ユーザーが明示的に動画の生成を指示した場合にのみ、この関数を使用してください。テキストプロンプト、または画像とテキストプロンプトから動画を生成します。重要：この関数を呼び出した後は、その結果を使ってユーザーへの最終的な応答メッセージを生成し、会話を完了させてください。再度関数を呼び出すことは禁止です。応答メッセージには、生成した動画を埋め込む場所を示す `[VIDEO_HERE]` という文字列の目印を必ず1つだけ配置してください。HTMLタグは絶対に生成しないでください。ユーザーの指示から、動画の内容を表す英語のプロンプトを生成して `prompt` 引数に設定してください。動画に含めたくない要素は英語で `negative_prompt` に設定します。ユーザーが『この画像から』『あの猫の絵を』のように元画像を指示した場合、会話の文脈から最も適切と思われる画像が含まれているメッセージのインデックス（番号）を特定し、`source_image_message_index` 引数に設定してください。関数がエラーを返した場合、エラー番号とエラー文をユーザーに出力して下さい。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "prompt": {
+                        "type": "STRING",
+                        "description": "動画の内容を説明する英語のプロンプト。"
+                    },
+                    "negative_prompt": {
+                        "type": "STRING",
+                        "description": "動画に含めたくない要素を説明する英語のネガティブプロンプト。"
+                    },
+                    "aspect_ratio": {
+                        "type": "STRING",
+                        "description": "動画のアスペクト比。'16:9' (横長), '9:16' (縦長), '1:1' (正方形) など。デフォルトは '16:9'。"
+                    },
+                    "source_image_message_index": {
+                        "type": "NUMBER",
+                        "description": "動画生成の元になる画像が含まれているメッセージのインデックス番号。ユーザーが送信したプロンプトが0、その一つ前のAIの応答が1となります。"
+                    }
+                },
+                "required": ["prompt"]
+            }
+        },
+        { 
+            "name": "generate_image",
+            "description": "ユーザーが明示的に画像の生成を指示した場合にのみ、この関数を使用してください。テキストプロンプトから画像を生成します。重要：この関数を呼び出した後は、その結果を使ってユーザーへの最終的な応答メッセージを生成し、会話を完了させてください。画像以外の余計な定型文（例：「Here is the original image:」など）は絶対に出力しないでください。再度関数を呼び出すことは禁止です。応答メッセージには、生成した画像を埋め込む場所を示す `[IMAGE_HERE]` という文字列の目印を必ず1つだけ配置してください。HTMLタグは絶対に生成しないでください。ユーザーの指示から、動画の内容を表す英語のプロンプトを生成して `prompt` 引数に設定してください。関数がエラーを返した場合、エラー番号とエラー文をユーザーに出力して下さい。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                "prompt": { 
+                    "type": "string", 
+                    "description": "生成したい画像の内容を表す英語プロンプト。" 
+                },
+                "model": {
+                    "type": "string",
+                    "description": "使用する画像生成モデルを指定します。指定がない場合はプロンプト内容に応じて自動的に選択されます。\n\n- \"imagen-4.0-generate-001\": 標準モデル。汎用的な画像生成に適しています。\n- \"imagen-4.0-ultra-generate-001\": 複雑な構図や多要素を含む画像（風景、群衆、広角など）に適しています。\n- \"imagen-4.0-fast-generate-001\": 単純でフラットな画像（アイコン、パターン、スタンプなど）に適しています。\n- \"gemini-2.5-flash-image-preview\": ユーザーが明示的に指定した場合のみ使用。Geminiによる簡易プレビュー生成を行います。",
+                    "enum": [
+                    "imagen-4.0-generate-001",
+                    "imagen-4.0-ultra-generate-001",
+                    "imagen-4.0-fast-generate-001",
+                    "gemini-2.5-flash-image-preview"
+                    ]
+                },
+                "numberOfImages": { 
+                    "type": "integer", 
+                    "minimum": 1, 
+                    "maximum": 4, 
+                    "default": 1,
+                    "description": "生成する画像の枚数（1〜4）。指定がなければ1。" 
+                },
+                "sampleImageSize": { 
+                    "type": "string", 
+                    "enum": ["1K", "2K"], 
+                    "default": "1K",
+                    "description": "生成画像の解像度を指定します。1Kは標準、2Kは高解像度。" 
+                },
+                "aspectRatio": { 
+                    "type": "string", 
+                    "enum": ["1:1","3:4","4:3","9:16","16:9"], 
+                    "default": "1:1",
+                    "description": "生成画像のアスペクト比を指定します。指定がなければ1:1。" 
+                }
+                },
+                "required": ["prompt"]
+            }
+        },
+        {
+            "name": "edit_image",
+            "description": "既存の画像を、テキストプロンプトに基づいて編集します。複数の画像を組み合わせて新しい画像を生成することも可能です。編集元となる画像は、会話履歴または保存済みアセットから柔軟に指定できます。関数がエラーを返した場合、エラー番号とエラー文をユーザーに出力して下さい。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "prompt": {
+                        "type": "STRING",
+                        "description": "画像をどのように編集または合成するかを指示する英語のプロンプト。例: 'make the character smile', 'place the character from the first image into the background of the second image'"
+                    },
+                    "source_images": {
+                        "type": "ARRAY",
+                        "description": "編集や合成の元となる画像ソースを指定するオブジェクトの配列。複数のソースを指定することで、画像を組み合わせることができます。",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "message_index": {
+                                    "type": "NUMBER",
+                                    "description": "会話履歴内の画像をソースとして使用する場合に指定。ユーザーが送信したプロンプトが0、その一つ前のAIの応答が1となります。"
+                                },
+                                "asset_name": {
+                                    "type": "STRING",
+                                    "description": "manage_image_assetsで保存した画像をソースとして使用する場合に、そのアセット名を指定します。"
+                                }
+                            }
+                        }
+                    }
+                },
+                "required": ["prompt", "source_images"]
+            }
+        }
       ]
   }
 ];

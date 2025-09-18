@@ -1,13 +1,23 @@
-// app.js
+import("https://esm.run/@google/genai").then(module => {
+    // 正しいクラス名 GoogleGenAI をグローバルスコープに設定
+    window.GoogleGenAI = module.GoogleGenAI;
+    console.log("Google GenAI SDK (@google/genai) の読み込みが完了しました。");
+}).catch(err => {
+    console.error("Google Gen AI SDKの読み込みに失敗しました:", err);
+    // エラーメッセージを画面に表示するなどのフォールバック処理
+    document.body.innerHTML = `<p style="color: red; padding: 20px;">SDKの読み込みに失敗しました。アプリを起動できません。</p>`;
+});
+
 // --- 定数 ---
 const DB_NAME = 'GeminiPWA_DB';
-const DB_VERSION = 8; // スキーマ変更なしのため据え置き
+const DB_VERSION = 11; 
 const SETTINGS_STORE = 'settings';
+const PROFILES_STORE = 'profiles';
 const CHATS_STORE = 'chats';
+const IMAGE_STORE = 'image_store';
 const CHAT_UPDATEDAT_INDEX = 'updatedAtIndex';
 const CHAT_CREATEDAT_INDEX = 'createdAtIndex';
 const DEFAULT_MODEL = 'gemini-2.5-pro';
-const DEFAULT_STREAMING_SPEED = 12;
 const DEFAULT_TEMPERATURE = 0.5;
 const DEFAULT_MAX_TOKENS = 4000;
 const DEFAULT_TOP_K = 40;
@@ -20,22 +30,24 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.34";
+const APP_VERSION = "0.4";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
 const MAX_TOTAL_ATTACHMENT_SIZE = 50 * 1024 * 1024; // 1メッセージあたりの合計添付ファイルサイズ上限 (例: 50MB) - API制限も考慮
 const INITIAL_RETRY_DELAY = 100; // 初期リトライ遅延時間 (ミリ秒)
+const MAX_PROFILES = 5; // プロファイル作成の上限数
 
 // 添付を確定する処理
 const extensionToMimeTypeMap = {
     // Text Data
     'pdf': 'application/pdf',
-    'js': 'text/javascript',   // 一般的な方を選択
-    'py': 'text/x-python',     // 一般的な方を選択
+    'js': 'text/javascript',
+    'py': 'text/x-python',
     'txt': 'text/plain',
     'html': 'text/html',
-    'htm': 'text/html',        // .htm も考慮
+    'htm': 'text/html',
+    'json': 'text/json',
     'css': 'text/css',
     'md': 'text/md',
     'csv': 'text/csv',
@@ -67,7 +79,7 @@ const extensionToMimeTypeMap = {
     'mp3': 'audio/mp3',
     'aiff': 'audio/aiff',
     'aac': 'audio/aac',
-    'ogg': 'audio/ogg',        // OGG Vorbis
+    'ogg': 'audio/ogg',
     'flac': 'audio/flac',
 };
 
@@ -96,8 +108,6 @@ const elements = {
     apiKeyInput: document.getElementById('api-key'),
     modelNameSelect: document.getElementById('model-name'),
     userDefinedModelsGroup: document.getElementById('user-defined-models-group'),
-    streamingOutputCheckbox: document.getElementById('streaming-output'),
-    streamingSpeedInput: document.getElementById('streaming-speed'),
     systemPromptDefaultTextarea: document.getElementById('system-prompt-default'),
     temperatureInput: document.getElementById('temperature'),
     maxTokensInput: document.getElementById('max-tokens'),
@@ -116,7 +126,6 @@ const elements = {
     dummyModelInput: document.getElementById('dummy-model'),
     concatDummyModelCheckbox: document.getElementById('concat-dummy-model'),
     additionalModelsTextarea: document.getElementById('additional-models'),
-    pseudoStreamingCheckbox: document.getElementById('pseudo-streaming'),
     enterToSendCheckbox: document.getElementById('enter-to-send'),
     historySortOrderSelect: document.getElementById('history-sort-order'),
     darkModeToggle: document.getElementById('dark-mode-toggle'),
@@ -124,6 +133,7 @@ const elements = {
     hideSystemPromptToggle: document.getElementById('hide-system-prompt-toggle'),
     geminiEnableGroundingToggle: document.getElementById('gemini-enable-grounding-toggle'),
     geminiEnableFunctionCallingToggle: document.getElementById('gemini-enable-function-calling-toggle'),
+    forceFunctionCallingToggle: document.getElementById('force-function-calling-toggle'),
     appVersionSpan: document.getElementById('app-version'),
     backgroundImageInput: document.getElementById('background-image-input'),
     uploadBackgroundBtn: document.getElementById('upload-background-btn'),
@@ -134,7 +144,6 @@ const elements = {
     backToChatFromHistoryBtn: document.getElementById('back-to-chat-from-history'),
     backToChatFromSettingsBtn: document.getElementById('back-to-chat-from-settings'),
     newChatBtn: document.getElementById('new-chat-btn'),
-    saveSettingsBtns: document.querySelectorAll('.js-save-settings-btn'),
     updateAppBtn: document.getElementById('update-app-btn'),
     clearDataBtn: document.getElementById('clear-data-btn'),
     importHistoryBtn: document.getElementById('import-history-btn'),
@@ -179,6 +188,33 @@ const elements = {
     resetHeaderColorBtn: document.getElementById('reset-header-color-btn'),
     messageOpacitySlider: document.getElementById('message-opacity-slider'),
     messageOpacityValue:  document.getElementById('message-opacity-value'),
+    modelWarningMessage: document.getElementById('model-warning-message'),
+    profileCardHeaderWrapper: document.getElementById('profile-card-header-wrapper'),
+    profileCardHeader: document.getElementById('profile-card-header'),
+    profileCardIconContainer: document.getElementById('profile-card-icon-container'),
+    profileCardName: document.getElementById('profile-card-name'),
+    headerProfileMenu: document.getElementById('header-profile-menu'),
+    profileCardHeaderWrapperSettings: document.getElementById('profile-card-header-wrapper-settings'),
+    profileCardHeaderSettings: document.getElementById('profile-card-header-settings'),
+    profileCardIconContainerSettings: document.getElementById('profile-card-icon-container-settings'),
+    profileCardNameSettings: document.getElementById('profile-card-name-settings'),
+    headerProfileMenuSettings: document.getElementById('header-profile-menu-settings'),
+    profileManagementGroup: document.getElementById('profile-management-group'),
+    profileDisplayCard: document.getElementById('profile-display-card'),
+    profileDisplayIcon: document.getElementById('profile-display-icon'),
+    profileDisplayNameMain: document.getElementById('profile-display-name-main'),
+    profileDisplayNameSub: document.getElementById('profile-display-name-sub'),
+    profileDisplayStatus: document.getElementById('profile-display-status'),
+    profileEditNameBtn: document.getElementById('profile-edit-name-btn'),
+    profileIconInput: document.getElementById('profile-icon-input'),
+    profileResetIconBtn: document.getElementById('profile-reset-icon-btn'),
+    profileSaveNewBtn: document.getElementById('profile-save-new-btn'),
+    profileUpdateBtn: document.getElementById('profile-update-btn'),
+    profileDeleteBtn: document.getElementById('profile-delete-btn'),
+    profileExportBtn: document.getElementById('profile-export-btn'),
+    profileImportBtn: document.getElementById('profile-import-btn'),
+    profileImportInput: document.getElementById('profile-import-input'),
+    autoScrollToggle: document.getElementById('auto-scroll-toggle')
 };
 
 // --- アプリ状態 ---
@@ -188,11 +224,15 @@ const state = {
     currentMessages: [],
     currentSystemPrompt: '',
     currentPersistentMemory: {}, // 現在のチャットの永続メモリ
+    profiles: [], // 全プロファイルのリスト
+    activeProfileId: null, // 現在アクティブなプロファイルのID
+    activeProfile: null, // 現在アクティブなプロファイルの完全なデータ
+    profileIconUrls: new Map(),
+    videoUrlCache: new Map(),
+    imageUrlCache: new Map(),
     settings: {
         apiKey: '',
         modelName: DEFAULT_MODEL,
-        streamingOutput: false,
-        streamingSpeed: DEFAULT_STREAMING_SPEED,
         systemPrompt: '',
         temperature: null,
         maxTokens: null,
@@ -210,7 +250,6 @@ const state = {
         dummyModel: '',
         concatDummyModel: false,
         additionalModels: '',
-        pseudoStreaming: false,
         enterToSend: true,
         historySortOrder: 'updatedAt',
         darkMode: false,
@@ -233,12 +272,13 @@ const state = {
         messageOpacity: 1,
         overlayOpacity: 0.65,
         headerColor: '',
+        allowPromptUiChanges: true,
+        forceFunctionCalling: false,
+        autoScroll: true,
     },
     backgroundImageUrl: null,
     isSending: false,
     abortController: null,
-    partialStreamContent: '',
-    partialThoughtStreamContent: '',
     editingMessageIndex: null,
     isEditingSystemPrompt: false,
     touchStartX: 0,
@@ -250,6 +290,7 @@ const state = {
     currentScreen: 'chat',
     selectedFilesForUpload: [],
     pendingAttachments: [],
+    isTemporaryBackgroundActive: false,
     currentScene: null,
     currentStyleProfiles: {},
 };
@@ -320,18 +361,11 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// FileオブジェクトをBase64文字列に変換 (Promise)
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            // result は "data:mime/type;base64,..." の形式なので、ヘッダー部分を除去
-            const base64String = reader.result.split(',')[1];
-            resolve(base64String);
-        };
-        reader.onerror = error => reject(error);
-        reader.readAsDataURL(file); // Base64形式で読み込む
-    });
+
+
+// Base64文字列をBlobオブジェクトに変換 (Promise)
+function base64ToBlob(base64, mimeType) {
+    return fetch(`data:${mimeType};base64,${base64}`).then(res => res.blob());
 }
 
 // --- Service Worker関連 ---
@@ -393,55 +427,111 @@ const dbUtils = {
             request.onsuccess = (event) => {
                 state.db = event.target.result;
                 console.log("IndexedDBオープン成功");
-                // DB全体のエラーハンドリング
                 state.db.onerror = (event) => {
                     console.error(`データベースエラー: ${event.target.error}`);
                 };
                 resolve(state.db);
             };
 
-            // DBバージョン更新時 (スキーマ変更)
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 const transaction = event.target.transaction;
-                console.log(`IndexedDBをバージョン ${event.oldVersion} から ${event.newVersion} へアップグレード中...`);
+                console.log(`[DB Migration] IndexedDBをバージョン ${event.oldVersion} から ${event.newVersion} へアップグレード中...`);
 
-                // 設定ストア (変更なし)
+                // --- 既存ストアの確認と作成 ---
                 if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
                     db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
-                    console.log(`オブジェクトストア ${SETTINGS_STORE} 作成`);
                 }
-
-                // チャットストア & インデックス (変更なし、新しいフラグは動的に追加される)
-                let chatStore;
                 if (!db.objectStoreNames.contains(CHATS_STORE)) {
-                    chatStore = db.createObjectStore(CHATS_STORE, { keyPath: 'id', autoIncrement: true });
-                    console.log(`オブジェクトストア ${CHATS_STORE} 作成`);
-                } else {
-                     if (transaction) {
-                        try { chatStore = transaction.objectStore(CHATS_STORE); } catch (e) { console.error("チャットストアの取得中にエラー(アップグレード):", e); return; }
-                    } else { console.warn("チャットストアのアップグレード用トランザクション取得失敗"); }
-                }
-
-                // インデックスが存在することを確認
-                if (chatStore && !chatStore.indexNames.contains(CHAT_UPDATEDAT_INDEX)) {
+                    const chatStore = db.createObjectStore(CHATS_STORE, { keyPath: 'id', autoIncrement: true });
                     chatStore.createIndex(CHAT_UPDATEDAT_INDEX, 'updatedAt', { unique: false });
-                    console.log(`インデックス ${CHAT_UPDATEDAT_INDEX} を ${CHATS_STORE} に作成`);
-                }
-                if (chatStore && !chatStore.indexNames.contains(CHAT_CREATEDAT_INDEX)) {
                     chatStore.createIndex(CHAT_CREATEDAT_INDEX, 'createdAt', { unique: false });
-                    console.log(`インデックス ${CHAT_CREATEDAT_INDEX} を ${CHATS_STORE} に作成`);
+                }
+                if (!db.objectStoreNames.contains(PROFILES_STORE)) {
+                    db.createObjectStore(PROFILES_STORE, { keyPath: 'id', autoIncrement: true });
+                }
+                if (!db.objectStoreNames.contains('image_assets')) {
+                    db.createObjectStore('image_assets', { keyPath: 'name' });
                 }
 
-                // V8以降: 新しいフラグ (isCascaded, isSelected, siblingGroupId) は
-                // スキーマレスなIndexedDBの特性により、保存時に自動的に追加される。
-                // 読み込み時に存在しない場合はデフォルト値として扱う。
-                if (event.oldVersion < 8) { // 以前のバージョンからのアップグレードの場合
-                    console.log("DBアップグレード: 新しいメッセージフラグは動的に処理されます。");
+                // v10への移行処理 (プロファイル機能導入)
+                if (event.oldVersion < 10) {
+                    console.log("[DB Migration] v10へのデータ移行処理を実行します。");
+                    const settingsStore = transaction.objectStore(SETTINGS_STORE);
+                    const profilesStore = transaction.objectStore(PROFILES_STORE);
+                    
+                    const getAllSettingsReq = settingsStore.getAll();
+                    
+                    getAllSettingsReq.onsuccess = () => {
+                        const oldSettingsArray = getAllSettingsReq.result;
+                        
+                        if (oldSettingsArray.length > 0) {
+                            console.log("[DB Migration] 既存の設定を検出しました。新しいプロファイル構造に移行します...");
+                            
+                            const oldSettingsObject = {};
+                            oldSettingsArray.forEach(item => {
+                                oldSettingsObject[item.key] = item.value;
+                            });
+
+                            const profileSettingKeys = [
+                                'apiKey', 'modelName', 'systemPrompt', 'temperature', 'maxTokens', 'topK', 'topP',
+                                'presencePenalty', 'frequencyPenalty', 'thinkingBudget', 'includeThoughts',
+                                'enableThoughtTranslation', 'thoughtTranslationModel', 'dummyUser',
+                                'applyDummyToProofread', 'applyDummyToTranslate', 'dummyModel', 'concatDummyModel',
+                                'additionalModels', 'enterToSend', 'historySortOrder', 'darkMode', 'fontFamily',
+                                'hideSystemPromptInChat', 'enableSwipeNavigation', 'enableAutoRetry', 'maxRetries',
+                                'useFixedRetryDelay', 'fixedRetryDelaySeconds', 'maxBackoffDelaySeconds',
+                                'enableProofreading', 'proofreadingModelName', 'proofreadingSystemInstruction',
+                                'geminiEnableGrounding', 'geminiEnableFunctionCalling', 'googleSearchApiKey',
+                                'googleSearchEngineId', 'messageOpacity', 'overlayOpacity', 'headerColor',
+                                'allowPromptUiChanges', 'forceFunctionCalling'
+                            ];
+
+                            const newProfileSettings = {};
+                            profileSettingKeys.forEach(key => {
+                                newProfileSettings[key] = oldSettingsObject[key] !== undefined ? oldSettingsObject[key] : state.settings[key];
+                            });
+
+                            const defaultProfile = {
+                                name: "デフォルトプロファイル",
+                                icon: null,
+                                createdAt: Date.now(),
+                                settings: newProfileSettings
+                            };
+                            
+                            const addProfileReq = profilesStore.add(defaultProfile);
+                            
+                            addProfileReq.onsuccess = (addEvent) => {
+                                const newProfileId = addEvent.target.result;
+                                console.log(`[DB Migration] デフォルトプロファイルを生成しました (ID: ${newProfileId})`);
+
+                                profileSettingKeys.forEach(key => {
+                                    settingsStore.delete(key);
+                                });
+
+                                settingsStore.put({ key: 'activeProfileId', value: newProfileId });
+                                console.log(`[DB Migration] SETTINGS_STOREを整理し、activeProfileIdを設定しました。`);
+                            };
+                        }
+                    };
+                }
+
+                // v11へのアップグレード処理 (画像ストア追加)
+                if (event.oldVersion < 11) {
+                    console.log("[DB Migration] v11へのアップグレード: image_storeを作成します。");
+                    if (!db.objectStoreNames.contains(IMAGE_STORE)) {
+                        db.createObjectStore(IMAGE_STORE, { keyPath: 'id' });
+                    }
+                    transaction.oncomplete = () => {
+                        console.log("[DB Migration] スキーマ更新完了。データ移行処理を開始します。");
+                        appLogic.migrateImageData(); 
+                    };
                 }
             };
         });
     },
+
+
 
     // 指定されたストアを取得する内部関数
     _getStore(storeName, mode = 'readonly') {
@@ -473,147 +563,6 @@ const dbUtils = {
         });
     },
 
-    // 全設定を読み込み
-    async loadSettings() {
-        await this.openDB();
-        return new Promise((resolve, reject) => {
-            const store = this._getStore(SETTINGS_STORE);
-            const request = store.getAll();
-
-            request.onsuccess = (event) => {
-                const settingsArray = event.target.result;
-                const loadedSettings = {};
-                const ensureFloat = (v, fallback) => {
-                    if (v === null || v === undefined) return fallback;
-                    const n = (typeof v === 'string') ? parseFloat(v) : Number(v);
-                    return Number.isFinite(n) ? n : fallback;
-                };
-                if (loadedSettings.chatOverlayOpacity != null && loadedSettings.overlayOpacity == null) {
-                loadedSettings.overlayOpacity = ensureFloat(
-                    loadedSettings.chatOverlayOpacity,
-                    (state?.settings?.overlayOpacity ?? 0.65)
-                );
-                }
-                if (loadedSettings.overlayOpacity != null) {
-                    loadedSettings.overlayOpacity = ensureFloat(
-                    loadedSettings.overlayOpacity,
-                    (state?.settings?.overlayOpacity ?? 0.65)
-                );
-                }
-                settingsArray.forEach(item => {
-                    loadedSettings[item.key] = item.value;
-                });
-
-                const defaultSettings = { ...state.settings };
-                state.settings = { ...defaultSettings };
-
-                for (const key in loadedSettings) {
-                        if (key in defaultSettings) {
-                        const loadedValue = loadedSettings[key];
-                        const defaultValue = defaultSettings[key];
-
-                        if (key === 'backgroundImageBlob') {
-                            if (loadedValue instanceof Blob) {
-                                    state.settings[key] = loadedValue;
-                            } else {
-                                    if (loadedValue !== null) console.warn(`読み込んだ 'backgroundImageBlob' がBlobではありません。nullに設定します。型: ${typeof loadedValue}`);
-                                    state.settings[key] = null;
-                            }
-                        } else if (
-                            key === 'darkMode' || key === 'streamingOutput' || 
-                            key === 'pseudoStreaming' || key === 'enterToSend' || 
-                            key === 'concatDummyModel' || key === 'hideSystemPromptInChat' ||
-                            key === 'enableSwipeNavigation' || key === 'includeThoughts' ||
-                            key === 'geminiEnableGrounding' || key === 'geminiEnableFunctionCalling' ||
-                            key === 'enableProofreading' || key === 'enableAutoRetry' ||
-                            key === 'useFixedRetryDelay' ||
-                            key === 'applyDummyToProofread' ||
-                            key === 'applyDummyToTranslate' ||
-                            key === 'enableThoughtTranslation'
-                        ) {
-                                state.settings[key] = loadedValue === true;
-                        } else if (key === 'thinkingBudget') {
-                            const num = parseInt(loadedValue, 10);
-                            if (isNaN(num) || num < 0) {
-                                state.settings[key] = null;
-                            } else {
-                                state.settings[key] = num;
-                            }
-                        } else if (typeof defaultValue === 'number' || defaultValue === null) {
-                                let num;
-                                if (key === 'temperature' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty' || key === 'overlayOpacity' || key === 'messageOpacity') {
-                                num = parseFloat(loadedValue);
-                            } else {
-                                num = parseInt(loadedValue, 10);
-                            }
-
-                                if (isNaN(num)) {
-                                    if ((key === 'temperature' || key === 'maxTokens' || key === 'topK' || key === 'topP' || key === 'presencePenalty' || key === 'frequencyPenalty') && (loadedValue === null || loadedValue === '')) {
-                                        state.settings[key] = null;
-                                    } else {
-                                        state.settings[key] = defaultValue;
-                                    }
-                                } else {
-                                    if (key === 'temperature' && (num < 0 || num > 2)) num = defaultValue;
-                                    if (key === 'maxTokens' && num < 1) num = defaultValue;
-                                    if (key === 'topK' && num < 1) num = defaultValue;
-                                    if (key === 'topP' && (num < 0 || num > 1)) num = defaultValue;
-                                    if (key === 'streamingSpeed' && num < 0) num = defaultValue;
-                                    if ((key === 'presencePenalty' || key === 'frequencyPenalty') && (num < -2.0 || num > 2.0)) num = defaultValue;
-                                    if (key === 'overlayOpacity')   num = Math.min(1, Math.max(0,    num));
-                                    if (key === 'messageOpacity')   num = Math.min(1, Math.max(0.10, num));
-                                    state.settings[key] = num;
-                                }
-                        } else if (typeof defaultValue === 'string') {
-                                state.settings[key] = typeof loadedValue === 'string' ? loadedValue : defaultValue;
-                        } else {
-                            // この警告は '予期しない設定タイプ' として残す
-                            console.warn(`予期しない設定タイプ キー: ${key}`);
-                            state.settings[key] = loadedValue;
-                        }
-                    } else {
-                        // DBに存在するがstateのデフォルトにないキーは無視
-                        // console.warn(`DBから読み込んだ未知の設定を無視: ${key}`);
-                    }
-                }
-
-                if (state.settings.darkMode !== true && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                        console.log("OSのダークモード設定を初期適用");
-                        state.settings.darkMode = true;
-                }
-
-                console.log("設定読み込み完了:", { ...state.settings, backgroundImageBlob: state.settings.backgroundImageBlob ? '[Blob]' : null });
-                {
-                    uiUtils.applyOverlayOpacity();
-                    const ov = Number(state.settings?.overlayOpacity ?? 0.65);
-                    const ovPct = Math.round(ov * 100);
-                    const ovSlider = document.getElementById('overlay-opacity-slider');
-                    const ovValue  = document.getElementById('overlay-opacity-value');
-                    if (ovSlider) {
-                        const clamped = Math.max(0, Math.min(95, Math.round(ovPct / 5) * 5));
-                        ovSlider.value = clamped;
-                    }
-                    if (ovValue) ovValue.textContent = `${ovPct}%`;
-                    document.documentElement.style.setProperty('--overlay-opacity', String(ov));
-                    
-                    const mv = Number(state.settings?.messageOpacity ?? 1);
-                    const mvPct = Math.round(mv * 100);
-                    const msgSlider = document.getElementById('message-opacity-slider');
-                    const msgValue  = document.getElementById('message-opacity-value');
-                    if (msgSlider) {
-                        const clamped = Math.max(10, Math.min(100, Math.round(mvPct / 5) * 5));
-                        msgSlider.value = clamped;
-                    }
-                    if (msgValue) msgValue.textContent = `${mvPct}%`;
-                    document.documentElement.style.setProperty('--message-bubble-opacity', String(mv));
-                    }
-                resolve(state.settings);
-            };
-            request.onerror = (event) => reject(`設定読み込みエラー: ${event.target.error}`);
-        });
-    },
-
-    // チャットを保存 (タイトル指定可)
     async saveChat(optionalTitle = null, chatObjectToSave = null) { // 第2引数を追加
         await this.openDB();
         
@@ -631,16 +580,24 @@ const dbUtils = {
                 timestamp: msg.timestamp,
                 thoughtSummary: msg.thoughtSummary || null,
                 tool_calls: msg.tool_calls || null,
+                ...(msg.imageIds && { imageIds: msg.imageIds }),
                 ...(msg.finishReason && { finishReason: msg.finishReason }),
                 ...(msg.safetyRatings && { safetyRatings: msg.safetyRatings }),
                 ...(msg.error && { error: msg.error }),
-                ...(msg.isCascaded !== undefined && { isCascaded: msg.isCascaded }), // ★ 追加
-                ...(msg.isSelected !== undefined && { isSelected: msg.isSelected }), // ★ 追加
-                ...(msg.siblingGroupId !== undefined && { siblingGroupId: msg.siblingGroupId }), // ★ 追加
+                ...(msg.isCascaded !== undefined && { isCascaded: msg.isCascaded }),
+                ...(msg.isSelected !== undefined && { isSelected: msg.isSelected }),
+                ...(msg.siblingGroupId !== undefined && { siblingGroupId: msg.siblingGroupId }),
                 ...(msg.groundingMetadata && { groundingMetadata: msg.groundingMetadata }),
                 ...(msg.attachments && msg.attachments.length > 0 && { attachments: msg.attachments }),
                 ...(msg.usageMetadata && { usageMetadata: msg.usageMetadata }),
                 ...(msg.executedFunctions && { executedFunctions: msg.executedFunctions }),
+                ...(msg.generated_images && msg.generated_images.length > 0 && { generated_images: msg.generated_images }),
+                ...(msg.generated_videos && msg.generated_videos.length > 0 && { 
+                    generated_videos: msg.generated_videos.map(video => ({
+                        base64Data: video.base64Data, // Base64データのみ保存
+                        prompt: video.prompt
+                    }))
+                }),
                 ...(msg.isHidden === true && { isHidden: true }),
                 ...(msg.isAutoTrigger === true && { isAutoTrigger: true })
             }));
@@ -829,6 +786,75 @@ const dbUtils = {
 
             transaction.onerror = (event) => reject(`データクリアトランザクション失敗: ${event.target.error}`);
         });
+    },
+
+    async getSetting(key) {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(SETTINGS_STORE);
+            const request = store.get(key);
+            request.onsuccess = (event) => resolve(event.target.result);
+            request.onerror = (event) => reject(`設定 '${key}' の取得エラー: ${event.target.error}`);
+        });
+    },
+
+    async addProfile(profile) {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(PROFILES_STORE, 'readwrite');
+            const request = store.add(profile);
+            request.onsuccess = (event) => {
+                console.log(`[DB] プロファイルを新規追加しました (ID: ${event.target.result})`);
+                resolve(event.target.result);
+            };
+            request.onerror = (event) => reject(`プロファイル追加エラー: ${event.target.error}`);
+        });
+    },
+
+    async getProfile(id) {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(PROFILES_STORE);
+            const request = store.get(id);
+            request.onsuccess = (event) => resolve(event.target.result);
+            request.onerror = (event) => reject(`プロファイル(ID: ${id})取得エラー: ${event.target.error}`);
+        });
+    },
+
+    async getAllProfiles() {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(PROFILES_STORE);
+            const request = store.getAll();
+            request.onsuccess = (event) => resolve(event.target.result);
+            request.onerror = (event) => reject(`全プロファイル取得エラー: ${event.target.error}`);
+        });
+    },
+
+    async updateProfile(profile) {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(PROFILES_STORE, 'readwrite');
+            const request = store.put(profile);
+            request.onsuccess = () => {
+                console.log(`[DB] プロファイルを更新しました (ID: ${profile.id})`);
+                resolve();
+            };
+            request.onerror = (event) => reject(`プロファイル(ID: ${profile.id})更新エラー: ${event.target.error}`);
+        });
+    },
+
+    async deleteProfile(id) {
+        await this.openDB();
+        return new Promise((resolve, reject) => {
+            const store = this._getStore(PROFILES_STORE, 'readwrite');
+            const request = store.delete(id);
+            request.onsuccess = () => {
+                console.log(`[DB] プロファイルを削除しました (ID: ${id})`);
+                resolve();
+            };
+            request.onerror = (event) => reject(`プロファイル(ID: ${id})削除エラー: ${event.target.error}`);
+        });
     }
 };
 
@@ -839,84 +865,139 @@ const uiUtils = {
     },
     // オーバーレイの透明度を適用
     applyOverlayOpacity() {
-        const opacityValue = state.settings.overlayOpacity;
-        document.documentElement.style.setProperty('--overlay-opacity', opacityValue);
+        const opacityValue = state.settings.overlayOpacity ?? 0.75; // デフォルト値を0.75に
+        document.documentElement.style.setProperty('--overlay-opacity-value', opacityValue);
         console.log(`オーバーレイ透明度適用: ${opacityValue}`);
     },
-    // チャットメッセージをレンダリング
+
+        // 新しいメッセージ要素をコンテナの末尾に追加する（ちらつき防止用）
+    appendMessage(role, content, index, isStreamingPlaceholder = false, cascadeInfo = null, attachments = null) {
+        const messageElement = this.createMessageElement(role, content, index, isStreamingPlaceholder, cascadeInfo, attachments);
+        if (messageElement) {
+            elements.messageContainer.appendChild(messageElement);
+            if (window.Prism) {
+                // 追加した要素内のコードブロックのみをハイライトする
+                messageElement.querySelectorAll('pre code').forEach((block) => {
+                    Prism.highlightElement(block);
+                });
+            }
+        }
+    },
+
+    // 新しいメッセージ要素をコンテナの末尾に追加する（ちらつき防止用）
+    appendMessage(role, content, index, isStreamingPlaceholder = false, cascadeInfo = null, attachments = null) {
+        const messageElement = this.createMessageElement(role, content, index, isStreamingPlaceholder, cascadeInfo, attachments);
+        if (messageElement) {
+            elements.messageContainer.appendChild(messageElement);
+            if (window.Prism) {
+                // 追加した要素内のコードブロックのみをハイライトする
+                messageElement.querySelectorAll('pre code').forEach((block) => {
+                    Prism.highlightElement(block);
+                });
+            }
+        }
+    },
+
     renderChatMessages() {
+        const startTime = performance.now();
+        console.log(`%c[PERF_DEBUG] renderChatMessages 開始`, 'color: red; font-weight: bold;', { startTime });
+
+        const container = elements.messageContainer;
+        
+        // ちらつき防止策は維持
+        container.style.minHeight = `${container.scrollHeight}px`;
+
+        // キャッシュクリアと編集中状態のキャンセル
+        if (state.imageUrlCache.size > 0) {
+            for (const url of state.imageUrlCache.values()) {
+                URL.revokeObjectURL(url);
+            }
+            state.imageUrlCache.clear();
+        }
         if (state.editingMessageIndex !== null) {
-            const messageElement = elements.messageContainer.querySelector(`.message[data-index="${state.editingMessageIndex}"]`);
+            const messageElement = container.querySelector(`.message[data-index="${state.editingMessageIndex}"]`);
             if (messageElement) appLogic.cancelEditMessage(state.editingMessageIndex, messageElement);
             else state.editingMessageIndex = null;
         }
-        elements.messageContainer.innerHTML = '';
 
-        let currentSiblingGroupId = null;
-        let siblingsInGroup = [];
-        let siblingIndex = 0;
+        // DOMの再構築
+        container.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        const visibleMessages = [];
+        const processedGroupIds = new Set();
 
-        for (let i = 0; i < state.currentMessages.length; i++) {
-            const msg = state.currentMessages[i];
-            if (msg && msg.isHidden === true) continue;
-
-            const nextMsg = state.currentMessages[i + 1];
-            const isOldIntermediateMessage = msg.role === 'model' && !msg.content && nextMsg && nextMsg.role === 'tool';
-            if (msg.role === 'tool' || (msg.role === 'model' && msg.tool_calls) || isOldIntermediateMessage) {
-                continue;
-            }
-
-            if (msg.role === 'model' && msg.isCascaded && msg.siblingGroupId) {
-                if (msg.siblingGroupId !== currentSiblingGroupId) {
-                    currentSiblingGroupId = msg.siblingGroupId;
-                    siblingsInGroup = state.currentMessages
-                        .filter(m => m.role === 'model' && m.isCascaded && m.siblingGroupId === currentSiblingGroupId);
-                    siblingIndex = 0;
-                }
-
-                const currentIndexInGroup = siblingsInGroup.findIndex(m => m === msg);
-                if (currentIndexInGroup !== -1) {
-                    siblingIndex = currentIndexInGroup + 1;
-                }
-
-                if (msg.isSelected) {
-                    this.appendMessage(msg.role, msg.content, i, false, {
-                        currentIndex: siblingIndex,
-                        total: siblingsInGroup.length,
-                        siblingGroupId: currentSiblingGroupId
-                    }, msg.attachments);
+        state.currentMessages.forEach((msg) => {
+            if (msg.isHidden) return;
+            if (msg.isCascaded && msg.siblingGroupId) {
+                if (!processedGroupIds.has(msg.siblingGroupId)) {
+                    const siblings = state.currentMessages.filter(m => m.siblingGroupId === msg.siblingGroupId && !m.isHidden);
+                    const selectedSibling = siblings.find(m => m.isSelected) || siblings[siblings.length - 1];
+                    if (selectedSibling) {
+                        visibleMessages.push(selectedSibling);
+                    }
+                    processedGroupIds.add(msg.siblingGroupId);
                 }
             } else {
-                currentSiblingGroupId = null;
-                siblingsInGroup = [];
-                this.appendMessage(msg.role, msg.content, i, false, null, msg.attachments);
+                visibleMessages.push(msg);
             }
+        });
+
+        visibleMessages.forEach(msg => {
+            const index = state.currentMessages.indexOf(msg);
+            if (index === -1 || msg.role === 'tool') return;
+            
+            let cascadeInfo = null;
+            if (msg.isCascaded && msg.siblingGroupId) {
+                const siblings = state.currentMessages.filter(m => m.siblingGroupId === msg.siblingGroupId && !m.isHidden);
+                const currentIndexInGroup = siblings.findIndex(m => m === msg);
+                cascadeInfo = {
+                    currentIndex: currentIndexInGroup + 1,
+                    total: siblings.length,
+                    siblingGroupId: msg.siblingGroupId
+                };
+            }
+            
+            const messageElement = this.createMessageElement(msg.role, msg.content, index, false, cascadeInfo, msg.attachments);
+            if (messageElement) {
+                fragment.appendChild(messageElement);
+            }
+        });
+        
+        container.appendChild(fragment);
+        
+        // Prism.jsのハイライト
+        if (window.Prism) {
+            Prism.highlightAll();
         }
+        
+        // ちらつき防止策の解除
+        requestAnimationFrame(() => {
+            container.style.minHeight = '';
+        });
+        const endTime = performance.now();
+        console.log(`%c[PERF_DEBUG] renderChatMessages 完了`, 'color: red; font-weight: bold;', { endTime, duration: endTime - startTime });
     },
 
 
-    // メッセージをコンテナに追加
-    // uiUtils オブジェクト内の appendMessage 関数を置き換えてください
-    appendMessage(role, content, index, isStreamingPlaceholder = false, cascadeInfo = null, attachments = null) {
+
+    createMessageElement(role, content, index, isStreamingPlaceholder = false, cascadeInfo = null, attachments = null) {
+        const messageData = state.currentMessages[index];
+        if (!messageData) return null;
+
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', role);
         messageDiv.dataset.index = index;
-
-        const messageData = state.currentMessages[index];
         
         if (role === 'model' && messageData && messageData.thoughtSummary) {
             const thoughtDetails = document.createElement('details');
             thoughtDetails.classList.add('thought-summary-details');
-
             const thoughtSummaryElem = document.createElement('summary');
             thoughtSummaryElem.textContent = '思考プロセス';
             thoughtDetails.appendChild(thoughtSummaryElem);
-
             const thoughtContentDiv = document.createElement('div');
             thoughtContentDiv.classList.add('thought-summary-content');
             if (isStreamingPlaceholder) {
                 thoughtContentDiv.id = `streaming-thought-summary-${index}`;
-                thoughtContentDiv.innerHTML = '';
             } else {
                 try {
                     thoughtContentDiv.innerHTML = marked.parse(messageData.thoughtSummary || '');
@@ -939,11 +1020,9 @@ const uiUtils = {
         if (role === 'user' && attachments && attachments.length > 0) {
             const details = document.createElement('details');
             details.classList.add('attachment-details');
-
             const summary = document.createElement('summary');
             summary.textContent = `添付ファイル (${attachments.length}件)`;
             details.appendChild(summary);
-
             const list = document.createElement('ul');
             list.classList.add('attachment-list');
             attachments.forEach(att => {
@@ -954,7 +1033,6 @@ const uiUtils = {
             });
             details.appendChild(list);
             contentDiv.appendChild(details);
-
             if (content && content.trim() !== '') {
                 const pre = document.createElement('pre');
                 pre.textContent = content;
@@ -963,16 +1041,14 @@ const uiUtils = {
             }
         } else {
             try {
-                if (role === 'model' && !isStreamingPlaceholder && typeof marked !== 'undefined') {
-                    contentDiv.innerHTML = marked.parse(content || '');
-                } else if (role === 'user') {
-                    const pre = document.createElement('pre'); pre.textContent = content; contentDiv.appendChild(pre);
+                if (content && (role === 'model' || role === 'user')) {
+                     if (role === 'model' && !isStreamingPlaceholder && typeof marked !== 'undefined') {
+                        contentDiv.innerHTML = marked.parse(content || '');
+                    } else {
+                        const pre = document.createElement('pre'); pre.textContent = content; contentDiv.appendChild(pre);
+                    }
                 } else if (role === 'error') {
                      const p = document.createElement('p'); p.textContent = content; contentDiv.appendChild(p);
-                } else if (isStreamingPlaceholder) {
-                    contentDiv.innerHTML = '';
-                } else {
-                    const pre = document.createElement('pre'); pre.textContent = content; contentDiv.appendChild(pre);
                 }
             } catch (e) {
                  console.error("Markdownパースエラー:", e);
@@ -980,6 +1056,40 @@ const uiUtils = {
             }
         }
         messageDiv.appendChild(contentDiv);
+        
+        // [IMAGE_HERE] を遅延読み込み画像に置換する新しいロジック
+        const imagePlaceholderRegex = /<p>\[IMAGE_HERE\]<\/p>|\[IMAGE_HERE\]/g;
+        if (role === 'model' && messageData && messageData.imageIds && messageData.imageIds.length > 0) {
+            let imageIndex = 0;
+            const replacedHtml = contentDiv.innerHTML.replace(imagePlaceholderRegex, () => {
+                if (imageIndex < messageData.imageIds.length) {
+                    const imageId = messageData.imageIds[imageIndex++];
+                    // プレースホルダーのimgタグを生成
+                    return `<img class="lazy-load-image" alt="生成画像（読み込み中...）" data-image-id="${imageId}">`;
+                }
+                return '';
+            });
+            contentDiv.innerHTML = replacedHtml;
+
+            // プレースホルダーが足りなかった画像を末尾に追加
+            if (imageIndex < messageData.imageIds.length) {
+                const fragment = document.createDocumentFragment();
+                for (let i = imageIndex; i < messageData.imageIds.length; i++) {
+                    const imageId = messageData.imageIds[i];
+                    const img = document.createElement('img');
+                    img.className = 'lazy-load-image';
+                    img.alt = '生成画像（読み込み中...）';
+                    img.dataset.imageId = imageId;
+                    fragment.appendChild(img);
+                }
+                contentDiv.appendChild(fragment);
+            }
+            // 遅延読み込みオブザーバーに新しい画像を追加
+            requestAnimationFrame(() => {
+                const newImages = contentDiv.querySelectorAll('.lazy-load-image');
+                newImages.forEach(img => appLogic.imageObserver.observe(img));
+            });
+        }
         
         if (role === 'model' && messageData && messageData.groundingMetadata &&
             ( (messageData.groundingMetadata.groundingChunks && messageData.groundingMetadata.groundingChunks.length > 0) ||
@@ -989,17 +1099,13 @@ const uiUtils = {
             try {
                 const details = document.createElement('details');
                 details.classList.add('citation-details');
-
                 const summary = document.createElement('summary');
                 summary.textContent = '引用元/検索クエリ';
                 details.appendChild(summary);
-
                 let detailsHasContent = false;
-
                 if (messageData.groundingMetadata.groundingChunks && messageData.groundingMetadata.groundingChunks.length > 0) {
                     const citationList = document.createElement('ul');
                     citationList.classList.add('citation-list');
-
                     const citationMap = new Map();
                     let displayIndexCounter = 1;
                     if (messageData.groundingMetadata.groundingSupports) {
@@ -1020,10 +1126,8 @@ const uiUtils = {
                             }
                         });
                     }
-
                     const sortedCitations = Array.from(citationMap.entries())
                                                 .sort(([, a], [, b]) => a.displayIndex - b.displayIndex);
-
                     sortedCitations.forEach(([chunkIndex, citationInfo]) => {
                         const listItem = document.createElement('li');
                         const link = document.createElement('a');
@@ -1035,7 +1139,6 @@ const uiUtils = {
                         listItem.appendChild(link);
                         citationList.appendChild(listItem);
                     });
-
                     if (sortedCitations.length === 0) {
                          messageData.groundingMetadata.groundingChunks.forEach((chunk, idx) => {
                              if (chunk?.web?.uri) {
@@ -1051,13 +1154,11 @@ const uiUtils = {
                              }
                          });
                     }
-
                     if (citationList.hasChildNodes()) {
                         details.appendChild(citationList);
                         detailsHasContent = true;
                     }
                 }
-
                 if (messageData.groundingMetadata.webSearchQueries && messageData.groundingMetadata.webSearchQueries.length > 0) {
                     if (detailsHasContent) {
                         const separator = document.createElement('hr');
@@ -1067,7 +1168,6 @@ const uiUtils = {
                         separator.style.borderTop = '1px dashed var(--border-tertiary)'; 
                         details.appendChild(separator);
                     }
-
                     const queryHeader = document.createElement('div');
                     queryHeader.textContent = '検索に使用されたクエリ:';
                     queryHeader.style.fontWeight = '500';
@@ -1076,7 +1176,6 @@ const uiUtils = {
                     queryHeader.style.fontSize = '11px';
                     queryHeader.style.color = 'var(--text-secondary)';
                     details.appendChild(queryHeader);
-
                     const queryList = document.createElement('ul');
                     queryList.classList.add('search-query-list');
                     queryList.style.listStyle = 'none';
@@ -1084,7 +1183,6 @@ const uiUtils = {
                     queryList.style.margin = '0';
                     queryList.style.fontSize = '11px';
                     queryList.style.color = 'var(--text-secondary)';
-
                     messageData.groundingMetadata.webSearchQueries.forEach(query => {
                         const queryItem = document.createElement('li');
                         queryItem.textContent = `• ${query}`;
@@ -1094,11 +1192,9 @@ const uiUtils = {
                     details.appendChild(queryList);
                     detailsHasContent = true;
                 }
-
                 if (detailsHasContent) {
                     contentDiv.appendChild(details);
                 }
-
             } catch (e) {
                 console.error(`引用元/検索クエリ表示の生成中にエラーが発生しました (index: ${index}):`, e);
             }
@@ -1107,22 +1203,90 @@ const uiUtils = {
         if (role === 'model' && messageData && messageData.executedFunctions && messageData.executedFunctions.length > 0) {
             const details = document.createElement('details');
             details.classList.add('function-call-details');
-
             const uniqueFunctions = [...new Set(messageData.executedFunctions)];
             const summary = document.createElement('summary');
             summary.innerHTML = `⚙️ ツール使用 (${uniqueFunctions.length}件)`;
             details.appendChild(summary);
-
             const list = document.createElement('ul');
             list.classList.add('function-call-list');
-            
             uniqueFunctions.forEach(funcName => {
                 const listItem = document.createElement('li');
                 listItem.textContent = funcName;
                 list.appendChild(listItem);
             });
             details.appendChild(list);
-            contentDiv.appendChild(details);
+            if (contentDiv.innerHTML.trim() !== '') {
+                contentDiv.appendChild(details);
+            } else {
+                messageDiv.appendChild(details);
+            }
+        }
+
+        if (role === 'model' && messageData && messageData.search_web_results && messageData.search_web_results.length > 0) {
+            const details = document.createElement('details');
+            details.classList.add('function-call-details');
+            const summary = document.createElement('summary');
+            summary.innerHTML = `🌐 Web検索結果 (${messageData.search_web_results.length}件)`;
+            details.appendChild(summary);
+            const list = document.createElement('ul');
+            list.classList.add('function-call-list');
+            messageData.search_web_results.forEach(result => {
+                const listItem = document.createElement('li');
+                const link = document.createElement('a');
+                link.href = result.link;
+                link.textContent = result.title;
+                link.title = result.snippet;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                listItem.appendChild(link);
+                list.appendChild(listItem);
+            });
+            details.appendChild(list);
+            if (contentDiv.innerHTML.trim() !== '') {
+                contentDiv.appendChild(details);
+            } else {
+                messageDiv.appendChild(details);
+            }
+        }
+
+        if (role === 'model' && messageData && messageData.generated_videos && messageData.generated_videos.length > 0) {
+            const videoData = messageData.generated_videos[0];
+            if (videoData && (videoData.url || videoData.base64Data)) {
+                const video = document.createElement('video');
+                video.controls = true; 
+                video.playsInline = true; 
+                video.muted = true; 
+                video.loop = true; 
+                video.style.maxWidth = '100%';
+                video.style.borderRadius = 'var(--border-radius-md)';
+                video.style.display = 'block';
+
+                if (videoData.url) {
+                    video.src = videoData.url;
+                } else if (videoData.base64Data) {
+                    base64ToBlob(videoData.base64Data, 'video/mp4')
+                        .then(blob => {
+                            const objectURL = URL.createObjectURL(blob);
+                            video.src = objectURL;
+                        })
+                        .catch(err => {
+                            console.error("Base64からの動画Blob生成に失敗:", err);
+                            video.remove();
+                        });
+                }
+
+                const placeholderRegex = /\[VIDEO_HERE\]/g;
+                if (placeholderRegex.test(contentDiv.innerHTML)) {
+                    let replaced = false;
+                    contentDiv.innerHTML = contentDiv.innerHTML.replace(placeholderRegex, (match) => {
+                        if (!replaced) {
+                            replaced = true;
+                            return video.outerHTML;
+                        }
+                        return '';
+                    });
+                }
+            }
         }
 
         const editArea = document.createElement('div');
@@ -1132,7 +1296,6 @@ const uiUtils = {
         if (role === 'model' && cascadeInfo && cascadeInfo.total > 1) {
             const cascadeControlsDiv = document.createElement('div');
             cascadeControlsDiv.classList.add('message-cascade-controls');
-
             const prevButton = document.createElement('button');
             prevButton.innerHTML = '<span class="material-symbols-outlined">chevron_left</span>';
             prevButton.title = '前の応答';
@@ -1140,12 +1303,10 @@ const uiUtils = {
             prevButton.disabled = cascadeInfo.currentIndex <= 1;
             prevButton.onclick = () => appLogic.navigateCascade(index, 'prev');
             cascadeControlsDiv.appendChild(prevButton);
-
             const indicatorSpan = document.createElement('span');
             indicatorSpan.classList.add('cascade-indicator');
             indicatorSpan.textContent = `${cascadeInfo.currentIndex}/${cascadeInfo.total}`;
             cascadeControlsDiv.appendChild(indicatorSpan);
-
             const nextButton = document.createElement('button');
             nextButton.innerHTML = '<span class="material-symbols-outlined">chevron_right</span>';
             nextButton.title = '次の応答';
@@ -1153,35 +1314,30 @@ const uiUtils = {
             nextButton.disabled = cascadeInfo.currentIndex >= cascadeInfo.total;
             nextButton.onclick = () => appLogic.navigateCascade(index, 'next');
             cascadeControlsDiv.appendChild(nextButton);
-
             const deleteCascadeButton = document.createElement('button');
             deleteCascadeButton.innerHTML = '<span class="material-symbols-outlined">delete</span>';
             deleteCascadeButton.title = 'この応答を削除';
             deleteCascadeButton.classList.add('cascade-delete-btn');
             deleteCascadeButton.onclick = () => appLogic.confirmDeleteCascadeResponse(index);
             cascadeControlsDiv.appendChild(deleteCascadeButton);
-
             messageDiv.appendChild(cascadeControlsDiv);
         }
 
         if (role !== 'error') {
             const actionsDiv = document.createElement('div');
             actionsDiv.classList.add('message-actions');
-            
             const editButton = document.createElement('button');
             editButton.innerHTML = '<span class="material-symbols-outlined">edit</span> 編集'; 
             editButton.title = 'メッセージを編集'; 
             editButton.classList.add('js-edit-btn');
             editButton.onclick = () => appLogic.startEditMessage(index, messageDiv);
             actionsDiv.appendChild(editButton);
-
             const deleteButton = document.createElement('button');
             deleteButton.innerHTML = '<span class="material-symbols-outlined">delete</span> 削除'; 
             deleteButton.title = 'この会話ターンを削除'; 
             deleteButton.classList.add('js-delete-btn');
             deleteButton.onclick = () => appLogic.deleteMessage(index);
             actionsDiv.appendChild(deleteButton);
-
             if (role === 'user') {
                 const retryButton = document.createElement('button');
                 retryButton.innerHTML = '<span class="material-symbols-outlined">replay</span> 再生成'; 
@@ -1190,7 +1346,6 @@ const uiUtils = {
                 retryButton.onclick = () => appLogic.retryFromMessage(index);
                 actionsDiv.appendChild(retryButton);
             }
-            
             if (role === 'model' && messageData?.usageMetadata &&
                 typeof messageData.usageMetadata.candidatesTokenCount === 'number' &&
                 typeof messageData.usageMetadata.totalTokenCount === 'number')
@@ -1208,7 +1363,6 @@ const uiUtils = {
                 tokenSpan.title = `Candidate Tokens / Total Tokens`;
                 actionsDiv.appendChild(tokenSpan);
             }
-
             if (role === 'model' && typeof messageData?.retryCount === 'number' && messageData.retryCount > 0) {
                 const retrySpan = document.createElement('span');
                 retrySpan.classList.add('token-count-display');
@@ -1219,99 +1373,13 @@ const uiUtils = {
                 }
                 actionsDiv.appendChild(retrySpan);
             }
-
             messageDiv.appendChild(actionsDiv);
         }
 
         if (isStreamingPlaceholder) {
             messageDiv.id = `streaming-message-${index}`;
         }
-        elements.messageContainer.appendChild(messageDiv);
-    },
-
-    // ストリーミング中のメッセージを更新
-    updateStreamingMessage(index, newChar, isThoughtSummary = false) { // newChar は実際には使わなくなる
-        const messageDiv = document.getElementById(`streaming-message-${index}`);
-        if (messageDiv && typeof marked !== 'undefined') {
-            let targetContentDiv;
-            let streamContent;
-
-            if (isThoughtSummary) {
-                targetContentDiv = messageDiv.querySelector(`#streaming-thought-summary-${index}`);
-                streamContent = state.partialThoughtStreamContent; // stateから直接取得
-            } else {
-                targetContentDiv = messageDiv.querySelector('.message-content');
-                streamContent = state.partialStreamContent; // stateから直接取得
-            }
-
-            if (targetContentDiv) {
-                try {
-                    targetContentDiv.innerHTML = marked.parse(streamContent || '');
-                } catch (e) {
-                    console.error(`ストリーミング更新中のMarkdownパースエラー (${isThoughtSummary ? 'Thought' : 'Content'}):`, e);
-                    targetContentDiv.textContent = streamContent;
-                }
-            }
-            if (!isThoughtSummary) {
-                this.scrollToBottom();
-            }
-        }
-    },
-
-    // ストリーミングメッセージの完了処理
-    finalizeStreamingMessage(index) {
-        const messageDiv = document.getElementById(`streaming-message-${index}`);
-        if (messageDiv) {
-            const finalMessageData = state.currentMessages[index];
-            if (!finalMessageData) return;
-
-            // Thought Summary の最終処理
-            if (finalMessageData.thoughtSummary) {
-                const thoughtContentDiv = messageDiv.querySelector(`#streaming-thought-summary-${index}`);
-                if (thoughtContentDiv && typeof marked !== 'undefined') {
-                    try {
-                        thoughtContentDiv.innerHTML = marked.parse(finalMessageData.thoughtSummary || '');
-                    } catch (e) {
-                        console.error("Thought Summary ストリーミング完了時のMarkdownパースエラー:", e);
-                        thoughtContentDiv.textContent = finalMessageData.thoughtSummary || '';
-                    }
-                    thoughtContentDiv.removeAttribute('id'); // IDを削除
-                } else if (thoughtContentDiv) {
-                    thoughtContentDiv.textContent = finalMessageData.thoughtSummary || '';
-                    thoughtContentDiv.removeAttribute('id');
-                }
-            }
-
-            // 通常コンテンツの最終処理
-            const contentDiv = messageDiv.querySelector('.message-content');
-            // stateから最終的なコンテンツを取得
-            const finalRawContent = finalMessageData.content || '';
-            if (contentDiv && typeof marked !== 'undefined') {
-                 try {
-                     // 最終コンテンツをMarkdownとしてパース
-                     contentDiv.innerHTML = marked.parse(finalRawContent);
-                 } catch (e) {
-                     console.error("ストリーミング完了時のMarkdownパースエラー:", e);
-                     contentDiv.textContent = finalRawContent; // エラー時はテキスト表示
-                 }
-            } else if (contentDiv) {
-                contentDiv.textContent = finalRawContent; // markedがない場合のフォールバック
-            }
-            messageDiv.removeAttribute('id'); // IDを削除
-
-            // ストリーミング完了後、カスケードコントロールが必要かチェックして再描画
-            // (リトライ直後など、応答候補が増えた場合に必要)
-            const msgData = state.currentMessages[index];
-            if (msgData && msgData.role === 'model' && msgData.isCascaded) {
-                const siblings = appLogic.getCascadedSiblings(index);
-                if (siblings.length > 1) {
-                    // コントロールを再生成または更新
-                    // 一旦、renderChatMessagesを呼び出すのが簡単かもしれない
-                    this.renderChatMessages(); // UI全体を再描画
-                }
-            }
-        }
-        this.scrollToBottom(); // 最後にスクロール
+        return messageDiv;
     },
 
     // エラーメッセージを表示
@@ -1325,12 +1393,20 @@ const uiUtils = {
 
     // チャットコンテナの最下部へスクロール
     scrollToBottom() {
-        requestAnimationFrame(() => { // 次の描画タイミングで実行
-            const mainContent = elements.chatScreen.querySelector('.main-content');
-            if (mainContent) {
-                mainContent.scrollTop = mainContent.scrollHeight;
-            }
-        });
+        const mainContent = elements.chatScreen.querySelector('.main-content');
+        if (!mainContent) return;
+
+        // アンカー要素を取得
+        const anchor = document.getElementById('chat-anchor');
+        if (anchor) {
+            // scrollIntoViewを使用してアンカー要素を画面内に表示
+            anchor.scrollIntoView({ behavior: 'auto', block: 'end' });
+            console.log(`[Debug Scroll] scrollToBottom: アンカーへスクロールしました。`);
+        } else {
+            // フォールバックとして従来の処理を残す
+            console.warn(`[Debug Scroll] scrollToBottom: アンカーが見つかりません。scrollHeightでスクロールします。`);
+            mainContent.scrollTop = mainContent.scrollHeight;
+        }
     },
 
     // チャットタイトルを更新
@@ -1416,14 +1492,23 @@ const uiUtils = {
                     li.querySelector('.updated-date').textContent = `更新: ${this.formatDate(chat.updatedAt)}`;
 
                     // クリックイベント (アクションボタン以外)
-                    li.onclick = (event) => {
-                        // アクションボタンがクリックされた場合は何もしない
+                    li.onclick = async (event) => {
                         if (!event.target.closest('.history-item-actions button')) {
-                            appLogic.loadChat(chat.id);
-                            this.showScreen('chat'); // チャット画面へ遷移
+
+                            // ステップ1: まず画面遷移を開始し、UIを即座に反応させる
+                            // この時点ではチャットの中身は空か、前の状態のまま
+                            const screenTransitionPromise = uiUtils.showScreen('chat');
+
+                            // ステップ2: 画面遷移と並行して、重いチャット読み込み処理を行う
+                            const loadChatPromise = appLogic.loadChat(chat.id);
+
+                            // ステップ3: 両方の処理が完了するのを待つ
+                            // これにより、アニメーション中にDOMが書き換わることを防ぎ、
+                            // 読み込み完了後に確実に画面が表示されることを保証する。
+                            await Promise.all([screenTransitionPromise, loadChatPromise]);
+                            
                         }
                     };
-
                     // 各アクションボタンのイベントリスナー
                     li.querySelector('.js-edit-title-btn').onclick = (e) => { e.stopPropagation(); appLogic.editHistoryTitle(chat.id, titleEl); };
                     li.querySelector('.js-export-btn').onclick = (e) => { e.stopPropagation(); appLogic.exportChat(chat.id, titleText); };
@@ -1486,14 +1571,57 @@ const uiUtils = {
         elements.themeColorMeta.content = finalHeaderColor;
         console.log(`ヘッダーカラー適用。テーマカラー: ${finalHeaderColor}`);
     },
+
+    applyBackgroundImage() {
+        // 一時的な背景が適用中の場合は、永続設定で上書きしない
+        if (state.isTemporaryBackgroundActive) {
+            console.log("一時的な背景が適用中のため、永続的な背景の適用をスキップしました。");
+            return;
+        }
+        this.revokeExistingObjectUrl(); // 既存のURLがあれば破棄
+        const blob = state.settings.backgroundImageBlob;
+        if (blob instanceof Blob) {
+            try {
+                state.backgroundImageUrl = URL.createObjectURL(blob);
+                const newUrl = `url("${state.backgroundImageUrl}")`;
+                
+                const chatScreen = elements.chatScreen;
+                const isAlreadyVisible = chatScreen.classList.contains('background-visible');
+    
+                const switchImageAndFadeIn = () => {
+                    document.documentElement.style.setProperty('--chat-background-image', newUrl);
+                    chatScreen.classList.add('background-visible');
+                };
+    
+                if (isAlreadyVisible) {
+                    chatScreen.addEventListener('transitionend', switchImageAndFadeIn, { once: true });
+                    chatScreen.classList.remove('background-visible');
+                } else {
+                    switchImageAndFadeIn();
+                }
+    
+                console.log("背景画像をBlobから適用しました。");
+            } catch (e) {
+    
+                console.error("背景画像のオブジェクトURL生成に失敗:", e);
+                elements.chatScreen.classList.remove('background-visible');
+                document.documentElement.style.removeProperty('--chat-background-image');
+            }
+        } else {
+            elements.chatScreen.classList.remove('background-visible');
+            document.documentElement.style.removeProperty('--chat-background-image');
+        }
+        this.updateBackgroundSettingsUI(); // 設定画面のUIも更新
+    
+    
+    },
+
     // ------------------------------------
 
     // 設定をUIに適用
     applySettingsToUI() {
         elements.apiKeyInput.value = state.settings.apiKey || '';
         elements.modelNameSelect.value = state.settings.modelName || DEFAULT_MODEL;
-        elements.streamingOutputCheckbox.checked = state.settings.streamingOutput;
-        elements.streamingSpeedInput.value = state.settings.streamingSpeed ?? DEFAULT_STREAMING_SPEED;
         elements.systemPromptDefaultTextarea.value = state.settings.systemPrompt || '';
         elements.temperatureInput.value = state.settings.temperature === null ? '' : state.settings.temperature;
         elements.maxTokensInput.value = state.settings.maxTokens === null ? '' : state.settings.maxTokens;
@@ -1513,7 +1641,6 @@ const uiUtils = {
         elements.dummyModelInput.value = state.settings.dummyModel || '';
         elements.concatDummyModelCheckbox.checked = state.settings.concatDummyModel;
         elements.additionalModelsTextarea.value = state.settings.additionalModels || '';
-        elements.pseudoStreamingCheckbox.checked = state.settings.pseudoStreaming;
         elements.enterToSendCheckbox.checked = state.settings.enterToSend;
         elements.historySortOrderSelect.value = state.settings.historySortOrder || 'updatedAt';
         elements.darkModeToggle.checked = state.settings.darkMode;
@@ -1545,6 +1672,9 @@ const uiUtils = {
         if (elements.messageOpacitySlider) elements.messageOpacitySlider.value = msgPercent;
         if (elements.messageOpacityValue)  elements.messageOpacityValue.textContent = `${msgPercent}%`;
         document.documentElement.style.setProperty('--message-bubble-opacity', String(state.settings.messageOpacity ?? 1));
+        document.getElementById('allow-prompt-ui-changes').checked = state.settings.allowPromptUiChanges;
+        elements.forceFunctionCallingToggle.checked = state.settings.forceFunctionCalling;
+        elements.autoScrollToggle.checked = state.settings.autoScroll;
 
         const defaultHeaderColor = state.settings.darkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
         elements.headerColorInput.value = state.settings.headerColor || defaultHeaderColor;
@@ -1556,6 +1686,8 @@ const uiUtils = {
         this.toggleSystemPromptVisibility();
         this.applyOverlayOpacity();
         this.applyHeaderColor();
+        this.updateModelWarningMessage();
+        this.applyBackgroundImage();
     },
 
     // ユーザー指定モデルをコンボボックスに反映
@@ -1626,120 +1758,124 @@ const uiUtils = {
 
     // 画面を表示 (スワイプアニメーション + inert対応 + 戻るボタン対応)
     showScreen(screenName, fromPopState = false) {
-        // 編集中ならキャンセル
-        if (state.editingMessageIndex !== null) {
-             const messageElement = elements.messageContainer.querySelector(`.message[data-index="${state.editingMessageIndex}"]`);
-             if (messageElement) { // 要素が存在する場合のみキャンセル処理
-                appLogic.cancelEditMessage(state.editingMessageIndex, messageElement);
-             } else {
-                state.editingMessageIndex = null; // 要素が見つからない場合はインデックスのみリセット
-             }
-        }
-        // システムプロンプト編集中ならキャンセル
-        if (state.isEditingSystemPrompt) {
-            appLogic.cancelEditSystemPrompt();
-        }
-
-        // 現在の画面と同じなら何もしない
-        if (screenName === state.currentScreen) {
-            // console.log(`showScreen: Already on screen ${screenName}.`); // ログ削減
+        return new Promise((resolve) => {
+          const startTime = performance.now();
+          console.log(`%c[PERF_DEBUG] showScreen('${screenName}') 開始`, 'color: orange; font-weight: bold;', { startTime });
+      
+          // --- 同一画面への重複遷移は無視 ---
+          if (screenName === state.currentScreen) {
+            console.log('[NAV] skip same screen:', screenName);
+            resolve();
             return;
-        }
-
-        const allScreens = [elements.chatScreen, elements.historyScreen, elements.settingsScreen];
-        let activeScreen = null;
-
-        // fromPopStateがfalseの場合のみ履歴操作を行う (UI操作時)
-        if (!fromPopState) {
-            if (screenName === 'history' || screenName === 'settings') {
-                // 履歴/設定画面への遷移時は履歴を追加
-                history.pushState({ screen: screenName }, '', `#${screenName}`);
-                console.log(`Pushed state: ${screenName}`);
-            } else if (screenName === 'chat') {
-                // チャット画面へ戻る遷移 (通常はUIの戻るボタンやpopstateで処理される想定だが、
-                // 直接 showScreen('chat') が呼ばれた場合も考慮)
-                // ここではURLハッシュのみ更新し、履歴スタックは変更しない
-                history.replaceState({ screen: 'chat' }, '', '#chat');
-                console.log(`Replaced state: ${screenName}`);
-            }
-        } else {
-            // popstateイベント経由の場合は履歴操作は行わない
-            console.log(`showScreen called from popstate for ${screenName}`);
-        }
-
-        // まず全ての画面を非アクティブ＆inert状態にする
-        allScreens.forEach(screen => {
-            screen.classList.remove('active');
-            screen.inert = true; // 非アクティブ画面は操作不可に
-        });
-
-        // ターゲット画面に応じてtransformとアクティブ設定
-        if (screenName === 'chat') {
-            activeScreen = elements.chatScreen;
-            elements.chatScreen.style.transform = 'translateX(0)';
-            elements.historyScreen.style.transform = 'translateX(-100%)';
-            elements.settingsScreen.style.transform = 'translateX(100%)';
-            requestAnimationFrame(() => {
-                this.updateSystemPromptUI();
-                this.adjustTextareaHeight();
-                this.scrollToBottom();
-            });
-        } else if (screenName === 'history') {
-            activeScreen = elements.historyScreen;
-            elements.chatScreen.style.transform = 'translateX(100%)';
-            elements.historyScreen.style.transform = 'translateX(0)';
-            elements.settingsScreen.style.transform = 'translateX(200%)';
+          }
+      
+          const chat = elements.chatScreen;
+          const historyEl = elements.historyScreen;
+          const settings = elements.settingsScreen;
+          const allScreens = [chat, historyEl, settings];
+      
+          const pos = {
+            chat: {
+              chat: 'translate3d(0,0,0)',
+              history: 'translate3d(-100%,0,0)',
+              settings: 'translate3d(100%,0,0)',
+            },
+            history: {
+              chat: 'translate3d(100%,0,0)',
+              history: 'translate3d(0,0,0)',
+              settings: 'translate3d(200%,0,0)',
+            },
+            settings: {
+              chat: 'translate3d(-100%,0,0)',
+              history: 'translate3d(-200%,0,0)',
+              settings: 'translate3d(0,0,0)',
+            },
+          };
+      
+          if (screenName === 'chat') {
+            chat.style.transform = pos.chat.chat;
+            historyEl.style.transform = pos.chat.history;
+            settings.style.transform = pos.chat.settings;
+          } else if (screenName === 'history') {
+            chat.style.transform = pos.history.chat;
+            historyEl.style.transform = pos.history.history;
+            settings.style.transform = pos.history.settings;
             this.renderHistoryList();
-        } else if (screenName === 'settings') {
-            activeScreen = elements.settingsScreen;
-            elements.chatScreen.style.transform = 'translateX(-100%)';
-            elements.historyScreen.style.transform = 'translateX(-200%)';
-            elements.settingsScreen.style.transform = 'translateX(0)';
-            this.applySettingsToUI();
-        }
+          } else if (screenName === 'settings') {
 
-        // アニメーション適用とアクティブ化
-        requestAnimationFrame(() => {
-            allScreens.forEach(screen => {
-                screen.style.transition = 'transform 0.3s ease-in-out';
-            });
-            if (activeScreen) {
-                activeScreen.inert = false; // アクティブ画面は操作可能に
-                activeScreen.classList.add('active');
+            chat.style.transform = pos.settings.chat;
+            historyEl.style.transform = pos.settings.history;
+            settings.style.transform = pos.settings.settings;
+          }
+      
+          void elements.appContainer.offsetHeight;
+      
+          let activeScreen = null;
+          if (screenName === 'chat') activeScreen = chat;
+          else if (screenName === 'history') activeScreen = historyEl;
+          else if (screenName === 'settings') activeScreen = settings;
+      
+          if (activeScreen) {
+            activeScreen.classList.add('active');
+            activeScreen.inert = false;
+          }
+          allScreens.forEach((s) => {
+            if (s !== activeScreen) {
+              s.classList.remove('active');
+              s.inert = true;
             }
+          });
+      
+          if (!fromPopState) {
+            const entry = { screen: screenName };
+            if (screenName === 'chat' && state.__navSource === 'history-item') {
+              history.replaceState(entry, '', '#chat');
+            } else {
+              history.pushState(entry, '', `#${screenName}`);
+            }
+          }
+      
+          let finished = false;
+          const finish = () => {
+            if (finished) return;
+            finished = true;
+            state.currentScreen = screenName;
+            const endTime = performance.now();
+            console.log(`%cNavigated to screen: ${screenName}`, 'color: orange; font-weight: bold;');
+            console.log(`%c[PERF_DEBUG] showScreen('${screenName}') アニメーション完了/タイムアウト`, 'color: orange; font-weight: bold;', {
+              endTime,
+              duration: endTime - startTime,
+            });
+            resolve();
+          };
+          requestAnimationFrame(() => requestAnimationFrame(finish));
+          setTimeout(finish, 600);
         });
-
-        // 現在の画面名をstateに保存
-        state.currentScreen = screenName;
-        console.log(`Navigated to screen: ${screenName}`);
     },
 
     // 送信状態を設定
     setSendingState(sending) {
         state.isSending = sending;
         if (sending) {
-            elements.sendButton.innerHTML = '<span class="material-symbols-outlined">stop</span>'; // アイコン変更
-            elements.sendButton.classList.add('sending'); // スタイル変更用クラス
+            elements.sendButton.innerHTML = '<span class="material-symbols-outlined">stop</span>';
+            elements.sendButton.classList.add('sending');
             elements.sendButton.title = "停止";
-            elements.sendButton.disabled = false; // 停止ボタンは常に有効
-            elements.userInput.disabled = true; // 入力欄無効化
-            elements.attachFileBtn.disabled = true; // 添付ボタンも無効化
-            elements.loadingIndicator.classList.remove('hidden'); // ローディング表示
-            elements.loadingIndicator.setAttribute('aria-live', 'polite'); // スクリーンリーダー用
-            // システムプロンプト編集も不可にする
+            elements.sendButton.disabled = false;
+            elements.userInput.disabled = true;
+            elements.attachFileBtn.disabled = true;
+            elements.loadingIndicator.classList.remove('hidden');
+            elements.loadingIndicator.setAttribute('aria-live', 'polite');
             elements.systemPromptDetails.style.pointerEvents = 'none';
             elements.systemPromptDetails.style.opacity = '0.7';
         } else {
-            elements.sendButton.innerHTML = '<span class="material-symbols-outlined">send</span>'; // アイコン変更
+            elements.sendButton.innerHTML = '<span class="material-symbols-outlined">send</span>';
             elements.sendButton.classList.remove('sending');
             elements.sendButton.title = "送信";
-            // 入力が空なら送信ボタン無効化
-            elements.sendButton.disabled = elements.userInput.value.trim() === '';
-            elements.userInput.disabled = false; // 入力欄有効化
-            elements.attachFileBtn.disabled = false; // 添付ボタン有効化
-            elements.loadingIndicator.classList.add('hidden'); // ローディング非表示
+            elements.sendButton.disabled = elements.userInput.value.trim() === '' && state.pendingAttachments.length === 0;
+            elements.userInput.disabled = false;
+            elements.attachFileBtn.disabled = false;
+            elements.loadingIndicator.classList.add('hidden');
             elements.loadingIndicator.removeAttribute('aria-live');
-            // システムプロンプト編集を可能にする
             elements.systemPromptDetails.style.pointerEvents = '';
             elements.systemPromptDetails.style.opacity = '';
         }
@@ -1747,13 +1883,12 @@ const uiUtils = {
 
     // テキストエリアの高さを自動調整
     adjustTextareaHeight(textarea = elements.userInput, maxHeight = TEXTAREA_MAX_HEIGHT) {
-        textarea.style.height = 'auto'; // 一旦高さをリセット
+        textarea.style.height = 'auto';
         const scrollHeight = textarea.scrollHeight;
-        // 最大高さを超えないように設定
         textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
-        // メイン入力欄の場合、送信ボタンの有効/無効を更新
+        
         if (textarea === elements.userInput && !state.isSending) {
-            elements.sendButton.disabled = textarea.value.trim() === '';
+            elements.sendButton.disabled = textarea.value.trim() === '' && state.pendingAttachments.length === 0;
         }
     },
 
@@ -1841,26 +1976,20 @@ const uiUtils = {
     updateAttachmentBadgeVisibility() {
         const hasAttachments = state.pendingAttachments.length > 0;
         elements.attachFileBtn.classList.toggle('has-attachments', hasAttachments);
-        // console.log(`Attachment badge visibility updated: ${hasAttachments}`); // デバッグ用
     },
 
     // ファイルアップロードダイアログ表示
     showFileUploadDialog() {
-        // state.pendingAttachments に基づいて selectedFilesForUpload を初期化
-        if (state.pendingAttachments.length > 0) {
-            // pendingAttachments には { file: File, name: ..., mimeType: ..., base64Data: ... } が入っている
-            // selectedFilesForUpload には { file: File } を格納する
+        if (state.selectedFilesForUpload.length === 0 && state.pendingAttachments.length > 0) {
             state.selectedFilesForUpload = state.pendingAttachments.map(att => ({ file: att.file }));
             console.log("送信待ちの添付ファイルをダイアログに復元:", state.selectedFilesForUpload.map(item => item.file.name));
-        } else {
-            // 送信待ちファイルがなければクリア
+        } else if (state.selectedFilesForUpload.length === 0) {
+            // ファイルが選択されておらず、送信待ちもない場合はクリアを確実にする
             state.selectedFilesForUpload = [];
         }
 
-        // UI更新は初期化後に行う
         this.updateSelectedFilesUI();
         elements.fileUploadDialog.showModal();
-        // ダイアログ表示時にもバッジ状態を更新 (キャンセルで戻った場合など)
         this.updateAttachmentBadgeVisibility();
     },
 
@@ -1912,12 +2041,253 @@ const uiUtils = {
             elements.confirmAttachBtn.disabled = false;
         }
     },
+    buildLayeredImage(imageData) {
+        return new Promise((resolve) => {
+            const container = document.createElement('div');
+            container.className = 'layered-image-container';
+            container.title = 'クリックして画像を拡大';
+
+            const charImg = new Image();
+            charImg.onload = () => {
+                container.style.aspectRatio = charImg.naturalWidth / charImg.naturalHeight;
+
+                const bgImg = document.createElement('div');
+                bgImg.className = 'layered-background-image';
+                let bgUrl = imageData.background_url;
+                if (bgUrl && bgUrl !== 'none') {
+                    bgImg.style.backgroundImage = `url("${bgUrl}")`;
+                }
+
+                const charImgElement = document.createElement('img');
+                charImgElement.className = 'layered-character-image';
+                charImgElement.src = imageData.character_url;
+
+                if (imageData.size) {
+                    const styles = imageData.size.split(';').filter(s => s);
+                    styles.forEach(style => {
+                        const [key, value] = style.split(':');
+                        if (key && value) charImgElement.style[key.trim()] = value.trim();
+                    });
+                }
+                
+                container.appendChild(bgImg);
+                container.appendChild(charImgElement);
+                
+                // クリック拡大イベントリスナーを追加
+                container.addEventListener('click', () => {
+                    const modalOverlay = document.getElementById('image-modal-overlay');
+                    const modalImg = document.getElementById('image-modal-img');
+                    if (modalOverlay && modalImg) {
+                        modalImg.src = imageData.character_url;
+                        modalOverlay.classList.remove('hidden');
+                    }
+                });
+
+                resolve(container);
+            };
+            charImg.onerror = () => {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'layered-image-error';
+                errorDiv.textContent = `[キャラクター画像の読み込みに失敗: ${imageData.character_url}]`;
+                resolve(errorDiv);
+            };
+            charImg.src = imageData.character_url;
+        });
+    },
+    // モデル選択に応じた警告メッセージの表示/非表示を切り替え
+    updateModelWarningMessage() {
+        const selectedModel = elements.modelNameSelect.value;
+        const isNanoBanana = selectedModel === 'gemini-2.5-flash-image-preview';
+        elements.modelWarningMessage.classList.toggle('hidden', !isNanoBanana);
+    },
+    updateProfileSwitcher() {
+        const switcher = elements.profileSwitcher;
+        switcher.innerHTML = '';
+        state.profiles.forEach(profile => {
+            const option = document.createElement('option');
+            option.value = profile.id;
+            option.textContent = profile.name;
+            if (profile.id === state.activeProfileId) {
+                option.selected = true;
+            }
+            switcher.appendChild(option);
+        });
+        console.log("[UI] プロファイルスイッチャーを更新しました。");
+    },
+
+    updateProfileSwitcherUI() {
+        const menus = [elements.headerProfileMenu, elements.headerProfileMenuSettings];
+
+        menus.forEach(menu => {
+            if (!menu) return;
+            menu.innerHTML = '';
+            menu.addEventListener('click', e => e.stopPropagation());
+        });
+
+        state.profiles.forEach(profile => {
+            const menuItem = document.createElement('div');
+            menuItem.classList.add('profile-menu-item');
+            if (profile.id === state.activeProfileId) {
+                menuItem.classList.add('active');
+            }
+            menuItem.dataset.profileId = profile.id;
+
+            const iconContainer = document.createElement('div');
+            iconContainer.classList.add('profile-icon-container');
+            
+            if (profile.icon) {
+                let url = state.profileIconUrls.get(profile.id);
+                if (!url) {
+                    url = URL.createObjectURL(profile.icon);
+                    state.profileIconUrls.set(profile.id, url);
+                }
+                iconContainer.innerHTML = `<img src="${url}" alt="${profile.name}">`;
+            } else {
+                iconContainer.innerHTML = `<span class="material-symbols-outlined">account_circle</span>`;
+            }
+
+            const textContainer = document.createElement('div');
+            textContainer.classList.add('profile-menu-text-container');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.classList.add('profile-menu-name');
+            nameSpan.textContent = profile.name;
+
+            const modelSpan = document.createElement('span');
+            modelSpan.classList.add('profile-menu-model');
+            // profile.settingsが存在し、modelNameが設定されていれば表示
+            modelSpan.textContent = profile.settings?.modelName || 'モデル未設定';
+
+            textContainer.appendChild(nameSpan);
+            textContainer.appendChild(modelSpan);
+
+            menuItem.appendChild(iconContainer);
+            menuItem.appendChild(textContainer); // textContainerを追加
+
+            const switchHandler = (event) => {
+                event.stopPropagation();
+                appLogic.switchProfile(profile.id);
+                menus.forEach(m => m?.classList.add('hidden'));
+            };
+            
+            menus.forEach(menu => {
+                if (menu) {
+                    const clonedItem = menuItem.cloneNode(true);
+                    clonedItem.onclick = switchHandler;
+                    menu.appendChild(clonedItem);
+                }
+            });
+        });
+        
+        console.log("[UI] プロファイルメニューを更新しました。");
+    },
+
+    updateProfileCardUI() {
+        if (!state.activeProfile) return;
+        const profile = state.activeProfile;
+        
+        // --- ヘッダーカード (チャット & 設定) ---
+        const cards = [
+            { name: elements.profileCardName, container: elements.profileCardIconContainer },
+            { name: elements.profileCardNameSettings, container: elements.profileCardIconContainerSettings }
+        ];
+        
+        cards.forEach(card => {
+            // アイコンコンテナが存在すれば、アイコンの更新は必ず実行する
+            if (card.container) {
+                if (profile.icon) {
+                    let url = state.profileIconUrls.get(profile.id);
+                    if (!url) {
+                        url = URL.createObjectURL(profile.icon);
+                        state.profileIconUrls.set(profile.id, url);
+                    }
+                    card.container.innerHTML = `<img src="${url}" alt="プロファイルアイコン">`;
+                } else {
+                    card.container.innerHTML = `<span class="material-symbols-outlined">account_circle</span>`;
+                }
+            }
+            // 名前の要素が存在する場合のみ、名前を更新する
+            if (card.name) {
+                card.name.textContent = profile.name;
+            }
+        });
+
+        // --- 設定画面のプロファイル編集エリア ---
+        const iconImg = elements.profileDisplayIcon;
+        const iconPlaceholder = iconImg.nextElementSibling;
+        if (profile.icon) {
+            let url = state.profileIconUrls.get(profile.id);
+            if (!url) {
+                url = URL.createObjectURL(profile.icon);
+                state.profileIconUrls.set(profile.id, url);
+            }
+            iconImg.src = url;
+            iconImg.style.display = 'block';
+            iconPlaceholder.style.display = 'none';
+            elements.profileResetIconBtn.style.display = 'flex';
+        } else {
+            iconImg.style.display = 'none';
+            iconPlaceholder.style.display = 'flex';
+            elements.profileResetIconBtn.style.display = 'none';
+        }
+        elements.profileDisplayNameMain.textContent = profile.name;
+        
+        const subText = `${profile.settings.modelName || '...'} / T: ${profile.settings.temperature ?? '...'}`;
+        elements.profileDisplayNameSub.textContent = subText;
+        
+        elements.profileDisplayStatus.classList.toggle('active', profile.id === state.activeProfileId);
+
+        console.log("[UI] プロファイルカードUIを更新しました。");
+    },
+    
+
+    toggleProfileMenu(type) {
+        console.log(`[Debug Toggle] toggleProfileMenuが呼び出されました。type: ${type}`);
+        const menu = type === 'header' ? elements.headerProfileMenu : elements.headerProfileMenuSettings;
+        console.log('[Debug Toggle] 対象メニュー要素:', menu);
+        if (menu) {
+            menu.classList.toggle('hidden');
+            console.log(`[Debug Toggle] hiddenクラスをトグルしました。現在のクラス: ${menu.className}`);
+        } else {
+            console.error('[Debug Toggle] エラー: 対象となるメニュー要素が見つかりません。');
+        }
+    },
+
+    debug_moveChatScreen() {
+        console.log('[DEBUG_TRANSITION] デバッグ用遷移関数を開始します。');
+        const chatScreen = elements.chatScreen;
+    
+        // transitionendイベントリスナーを設定
+        const onTransitionEnd = (event) => {
+            // イベントが本当にchatScreenのtransformプロパティで発生したか確認
+            if (event.target === chatScreen && event.propertyName === 'transform') {
+                console.log('%c[DEBUG_TRANSITION] transitionend イベントが発火しました！', 'color: lime; font-weight: bold;');
+                // 念のためリスナーを削除
+                chatScreen.removeEventListener('transitionend', onTransitionEnd);
+            }
+        };
+        chatScreen.addEventListener('transitionend', onTransitionEnd);
+    
+        // 遷移を開始
+        console.log('[DEBUG_TRANSITION] これから transform を translateX(0) に設定します。');
+        requestAnimationFrame(() => {
+            chatScreen.style.transition = 'transform 0.3s ease-in-out';
+            chatScreen.style.transform = 'translateX(0)';
+            console.log('[DEBUG_TRANSITION] transform を設定しました。イベント発火を待ちます...');
+        });
+    }
 };
 
 // --- APIユーティリティ (apiUtils) ---
 const apiUtils = {
     // Gemini APIを呼び出す
-    async callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools = null) {
+    async callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false) {
+        console.log(`[Debug] callGeminiApi: 現在の設定値を確認します。`, {
+            forceFunctionCalling: state.settings.forceFunctionCalling,
+            geminiEnableFunctionCalling: state.settings.geminiEnableFunctionCalling,
+            isForcedNow: forceCalling
+        });
+
         if (!state.settings.apiKey) {
             throw new Error("APIキーが設定されていません。");
         }
@@ -1929,10 +2299,10 @@ const apiUtils = {
         const model = state.settings.modelName || DEFAULT_MODEL;
         const apiKey = state.settings.apiKey;
 
-        let endpointMethod = useStreaming
-            ? (usePseudo ? 'generateContent?alt=sse&' : 'streamGenerateContent?alt=sse&')
-            : 'generateContent?';
-        console.log(`使用モード: ${useStreaming ? (usePseudo ? '疑似ストリーミング' : 'リアルタイムストリーミング') : '非ストリーミング'}`);
+        const isImageGenModel = model === 'gemini-2.5-flash-image-preview';
+
+        const endpointMethod = 'generateContent?';
+        console.log(`使用モード: 非ストリーミング`);
 
         const endpoint = `${GEMINI_API_BASE_URL}${model}:${endpointMethod}key=${apiKey}`;
         
@@ -1940,23 +2310,28 @@ const apiUtils = {
         if (state.settings.presencePenalty !== null) finalGenerationConfig.presencePenalty = state.settings.presencePenalty;
         if (state.settings.frequencyPenalty !== null) finalGenerationConfig.frequencyPenalty = state.settings.frequencyPenalty;
         
-        if (state.settings.thinkingBudget !== null || state.settings.includeThoughts) {
-            finalGenerationConfig.thinkingConfig = finalGenerationConfig.thinkingConfig || {};
-            if (state.settings.thinkingBudget !== null && Number.isInteger(state.settings.thinkingBudget) && state.settings.thinkingBudget >= 0) {
-                finalGenerationConfig.thinkingConfig.thinkingBudget = state.settings.thinkingBudget;
-            }
-            if (state.settings.includeThoughts) {
-                finalGenerationConfig.thinkingConfig.includeThoughts = true;
-            }
-            if (Object.keys(finalGenerationConfig.thinkingConfig).length === 0) {
-                delete finalGenerationConfig.thinkingConfig;
+        if (isImageGenModel) {
+            finalGenerationConfig.responseModalities = ['IMAGE', 'TEXT'];
+            delete finalGenerationConfig.thinkingConfig;
+
+            delete finalGenerationConfig.maxOutputTokens;
+            delete finalGenerationConfig.topK;
+            delete finalGenerationConfig.topP;
+            delete finalGenerationConfig.temperature;
+            delete finalGenerationConfig.presencePenalty;
+            delete finalGenerationConfig.frequencyPenalty;
+
+        } else {
+            if (state.settings.thinkingBudget !== null || state.settings.includeThoughts) {
+                generationConfig.thinkingConfig = {};
+                if(state.settings.thinkingBudget !== null) generationConfig.thinkingConfig.thinkingBudget = state.settings.thinkingBudget;
+                if(state.settings.includeThoughts) generationConfig.thinkingConfig.includeThoughts = true;
             }
         }
 
         const requestBody = {
             contents: messagesForApi,
             ...(Object.keys(finalGenerationConfig).length > 0 && { generationConfig: finalGenerationConfig }),
-            ...(systemInstruction && systemInstruction.parts && systemInstruction.parts.length > 0 && systemInstruction.parts[0].text && { systemInstruction }),
             safetySettings : [
                 { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
                 { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -1964,19 +2339,41 @@ const apiUtils = {
                 { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
             ]
         };
-        
-        let finalTools = [];
-        if (state.settings.geminiEnableFunctionCalling) {
-            finalTools = window.functionDeclarations || [];
-            console.log("Function Calling を有効にしてAPIを呼び出します。");
-        } 
-        else if (state.settings.geminiEnableGrounding) {
-            finalTools.push({ "google_search": {} });
-            console.log("グラウンディング (Google Search) を有効にしてAPIを呼び出します。");
-        }
-        
-        if (finalTools.length > 0) {
-            requestBody.tools = finalTools;
+
+        if (isImageGenModel) {
+            requestBody.safetySettings = [
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+            ];
+        } else {
+            if (systemInstruction && systemInstruction.parts && systemInstruction.parts.length > 0 && systemInstruction.parts[0].text) {
+                requestBody.systemInstruction = systemInstruction;
+            }
+
+            let finalTools = [];
+            if (state.settings.geminiEnableFunctionCalling) {
+                finalTools = window.functionDeclarations || [];
+                console.log("Function Calling を有効にしてAPIを呼び出します。");
+            } 
+            else if (state.settings.geminiEnableGrounding) {
+                finalTools.push({ "google_search": {} });
+                console.log("グラウンディング (Google Search) を有効にしてAPIを呼び出します。");
+            }
+            
+            if (finalTools.length > 0) {
+                requestBody.tools = finalTools;
+            }
+
+            if (forceCalling && state.settings.geminiEnableFunctionCalling) {
+                requestBody.toolConfig = {
+                    functionCallingConfig: {
+                        mode: 'ANY'
+                    }
+                };
+                console.log("Function Calling を強制モード (ANY) で実行します。");
+            }
         }
 
         console.log("Geminiへの送信データ:", JSON.stringify(requestBody, (key, value) => {
@@ -2018,167 +2415,6 @@ const apiUtils = {
                 throw new Error("リクエストがキャンセルされました。");
             } else {
                 throw error;
-            }
-        }
-    },
-
-    // ストリーミングレスポンスを処理
-    async *handleStreamingResponse(response) {
-        if (!response.body) {
-            throw new Error("レスポンスボディがありません。");
-        }
-        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = '';
-        let lastCandidateInfo = null;
-        let isCancelled = false;
-        let groundingMetadata = null;
-        let finalUsageMetadata = null;
-        let toolCallsBuffer = []; 
-
-        try {
-            while (true) {
-                if (state.abortController?.signal.aborted && !isCancelled) {
-                    isCancelled = true;
-                    console.log("ストリーミング中に中断シグナルを検出");
-                    await reader.cancel("User aborted");
-                    throw new Error("リクエストがキャンセルされました。");
-                }
-
-                let readResult;
-                try {
-                    readResult = await reader.read();
-                } catch (readError) {
-                    if (readError.name === 'AbortError' || readError.message === "User aborted" || readError.message.includes("aborted")) {
-                        if (!isCancelled) {
-                            isCancelled = true;
-                            throw new Error("リクエストがキャンセルされました。");
-                        }
-                        break;
-                    }
-                    throw readError;
-                }
-
-                const { value, done } = readResult;
-
-                if (done) {
-                    if (buffer.trim()) {
-                        const finalData = parseSseDataForYield(buffer.trim().substring(6));
-                        if (finalData) yield finalData;
-                    }
-                    break;
-                }
-
-                buffer += value;
-                let remainingBuffer = buffer;
-                while (true) {
-                    const newlineIndex = remainingBuffer.indexOf('\n');
-                    if (newlineIndex === -1) {
-                        buffer = remainingBuffer;
-                        break;
-                    }
-                    const line = remainingBuffer.substring(0, newlineIndex).trim();
-                    remainingBuffer = remainingBuffer.substring(newlineIndex + 1);
-
-                    if (line.startsWith('data: ')) {
-                        const chunkData = parseSseDataForYield(line.substring(6));
-                        if (chunkData) {
-                            if (chunkData.groundingMetadata) groundingMetadata = chunkData.groundingMetadata;
-                            if (chunkData.usageMetadata) finalUsageMetadata = chunkData.usageMetadata;
-                            if (chunkData.toolCalls) {
-                                toolCallsBuffer.push(...chunkData.toolCalls);
-                            }
-                            yield chunkData;
-                        }
-                    } else if (line !== '') {
-                        console.warn("データ以外のSSE行を無視:", line);
-                    }
-                    if (remainingBuffer === '') {
-                        buffer = '';
-                        break;
-                    }
-                }
-            }
-            const finishReason = lastCandidateInfo?.finishReason;
-            const safetyRatings = lastCandidateInfo?.safetyRatings;
-
-            yield {
-                type: 'metadata',
-                finishReason: isCancelled ? 'ABORTED' : finishReason,
-                safetyRatings,
-                groundingMetadata: groundingMetadata,
-                usageMetadata: finalUsageMetadata,
-                toolCalls: toolCallsBuffer.length > 0 ? toolCallsBuffer : null
-            };
-
-        } catch (error) {
-            console.error("ストリームの読み取り/処理エラー:", error);
-            throw new Error(`ストリーミング処理エラー: ${error.message || error}`, { cause: { originalError: error } });
-        } finally {
-            if (!reader.closed && !isCancelled) {
-                try { await reader.cancel("Cleanup cancellation"); } catch(e) { console.error("クリーンアップキャンセル中のエラー:", e); }
-            }
-        }
-
-        function parseSseDataForYield(jsonString) {
-            try {
-                const chunkJson = JSON.parse(jsonString);
-                if (chunkJson.error) {
-                    console.error("ストリーム内のエラーメッセージ:", chunkJson.error);
-                    const errorMsg = `モデルエラー: ${chunkJson.error.message || JSON.stringify(chunkJson.error)}`;
-                    lastCandidateInfo = { error: chunkJson.error, finishReason: 'ERROR' };
-                    return { type: 'error', error: chunkJson.error, message: errorMsg };
-                }
-
-                let contentText = null;
-                let thoughtText = null;
-                let currentGroundingMetadata = null;
-                let currentUsageMetadata = null;
-                let currentToolCalls = null;
-
-                if (chunkJson.candidates && chunkJson.candidates.length > 0) {
-                    lastCandidateInfo = chunkJson.candidates[0];
-                    if (lastCandidateInfo?.content?.parts) {
-                        lastCandidateInfo.content.parts.forEach(part => {
-                            if (part.text) {
-                                if (part.thought === true) {
-                                    thoughtText = (thoughtText || '') + part.text;
-                                } else {
-                                    contentText = (contentText || '') + part.text;
-                                }
-                            } else if (part.functionCall) {
-                                if (!currentToolCalls) currentToolCalls = [];
-                                currentToolCalls.push({ functionCall: part.functionCall });
-                            }
-                        });
-                    }
-                    if (lastCandidateInfo.groundingMetadata) {
-                        currentGroundingMetadata = lastCandidateInfo.groundingMetadata;
-                    }
-                } else if (chunkJson.promptFeedback) {
-                    console.warn("ストリーム内のプロンプトフィードバック:", chunkJson.promptFeedback);
-                    const blockReason = chunkJson.promptFeedback.blockReason || 'SAFETY';
-                    lastCandidateInfo = { finishReason: blockReason, safetyRatings: chunkJson.promptFeedback.safetyRatings };
-                    return { type: 'metadata', finishReason: blockReason, safetyRatings: chunkJson.promptFeedback.safetyRatings };
-                }
-
-                if (chunkJson.usageMetadata) {
-                    currentUsageMetadata = chunkJson.usageMetadata;
-                }
-
-                if (contentText !== null || thoughtText !== null || currentGroundingMetadata || currentUsageMetadata || currentToolCalls) {
-                    return {
-                        type: 'chunk',
-                        contentText,
-                        thoughtText,
-                        groundingMetadata: currentGroundingMetadata,
-                        usageMetadata: currentUsageMetadata,
-                        toolCalls: currentToolCalls
-                    };
-                }
-                return null;
-            } catch (parseError) {
-                console.warn("ストリーム内の不正なJSONをスキップ:", jsonString, parseError);
-                return null;
             }
         }
     },
@@ -2326,19 +2562,27 @@ const apiUtils = {
 
 function updateCurrentSystemPrompt() {
     const provider = state.settings.apiProvider;
-    // 'gemini' 以外のプロバイダー設定も将来的に考慮に入れる
     const commonPrompt = state.settings.systemPrompt || '';
-    
-    // ひとまずGemini用のシステムプロンプトを優先するロジック（仮）
-    // 将来的には各プロバイダーの設定をここで分岐させる
     const specificPrompt = state.settings.systemPrompt || commonPrompt;
 
-    state.currentSystemPrompt = specificPrompt;
+    // 新規チャット(メッセージがまだない状態)の場合のみ、
+    // 設定のデフォルト値を state.currentSystemPrompt に反映する。
+    // 既存チャットや、新規でもユーザーが編集したチャットは上書きしない。
+    if (!state.currentChatId && state.currentMessages.length === 0) {
+        state.currentSystemPrompt = specificPrompt;
+        console.log(`新規チャットのため、デフォルトのシステムプロンプトを適用しました。`);
+    } else {
+        console.log(`既存チャットのため、デフォルトのシステムプロンプトによる上書きをスキップしました。`);
+    }
+
+    // ログ出力は関数の最後に移動
     console.log(`システムプロンプトを更新しました。Provider: ${provider}, Current Prompt: "${state.currentSystemPrompt.substring(0, 30)}..."`);
 }
 
 // --- アプリケーションロジック (appLogic) ---
 const appLogic = {
+    _setupEventListenersCallCount: 0,
+
     timerManager: {
         timers: {}, // { timer_name: { timerId: 123, endTime: 167... } }
         
@@ -2397,167 +2641,1059 @@ const appLogic = {
      * タイマー時間切れ時にAIに応答を促す関数
      * @param {string} timerName - 時間切れになったタイマーの名前
      */
-        async triggerTimerExpiredResponse(timerName) {
-            // 現在送信中の場合は何もしない
-            if (state.isSending) {
-                console.warn("タイマーが切れましたが、現在送信中のため自動応答をスキップします。");
+    async triggerTimerExpiredResponse(timerName) {
+        // 現在送信中の場合は何もしない
+        if (state.isSending) {
+            console.warn("タイマーが切れましたが、現在送信中のため自動応答をスキップします。");
+            return;
+        }
+        console.log(`タイマー「${timerName}」の時間切れ応答を生成します。`);
+
+        // ユーザーには見えない内部的な指示メッセージを作成
+        const systemInstructionForTimer = `[システムメモ]
+タイマー「${timerName}」が時間切れになりました。
+この事実を踏まえて、現在の会話の文脈に沿った自然な応答を生成してください。
+例えば、「そういえば、約束の時間だね」「時間切れだ！イベントが発生する」のように、会話を続けてください。
+このシステムメモ自体は応答に含めないでください。`;
+
+        const userMessage = { 
+            role: 'user', 
+            content: systemInstructionForTimer, 
+            timestamp: Date.now(),
+            attachments: [],
+            isHidden: true,
+            isAutoTrigger: true
+        };
+
+        // 履歴にこの内部メッセージを追加
+        state.currentMessages.push(userMessage);
+        
+        // UIにもメッセージ要素を追加するが、即座に非表示にする
+        const messageIndex = state.currentMessages.length - 1;
+        uiUtils.appendMessage(userMessage.role, userMessage.content, messageIndex);
+        const messageElement = elements.messageContainer.querySelector(`.message[data-index="${messageIndex}"]`);
+        if (messageElement) {
+            messageElement.style.display = 'none';
+        }
+
+        // 裏でhandleSendを呼び出す (第3引数 isAutoTrigger を true に設定)
+        await this.handleSend(false, -1, true);
+    },
+
+    async loadGlobalSettings() {
+        try {
+            console.log("[GlobalSettings] 共通設定の読み込みを開始します。");
+            const storedBlob = await dbUtils.getSetting('backgroundImageBlob');
+            if (storedBlob && storedBlob.value instanceof Blob) {
+                state.settings.backgroundImageBlob = storedBlob.value;
+                console.log("[GlobalSettings] 背景画像BlobをDBから読み込みました。");
+            }
+        } catch (error) {
+            console.error("[GlobalSettings] 共通設定の読み込み中にエラーが発生しました:", error);
+            // エラーが発生しても起動処理は続行する
+        }
+    },
+
+    async loadProfiles() {
+        try {
+            console.log("[Profile] プロファイルの読み込みを開始します。");
+            state.profiles = await dbUtils.getAllProfiles();
+            const activeIdSetting = await dbUtils.getSetting('activeProfileId');
+            state.activeProfileId = activeIdSetting ? activeIdSetting.value : null;
+
+            if (state.profiles.length === 0) {
+                console.warn("[Profile] プロファイルが見つかりません。最初のプロファイルを作成します。");
+                const newProfile = {
+                    name: "デフォルトプロファイル",
+                    icon: null,
+                    createdAt: Date.now(),
+                    settings: { ...state.settings }
+                };
+                const newId = await dbUtils.addProfile(newProfile);
+                await dbUtils.saveSetting('activeProfileId', newId);
+                state.profiles = [await dbUtils.getProfile(newId)];
+                state.activeProfileId = newId;
+            }
+
+            if (!state.activeProfileId || !state.profiles.some(p => p.id === state.activeProfileId)) {
+                state.activeProfileId = state.profiles[0].id;
+                await dbUtils.saveSetting('activeProfileId', state.activeProfileId);
+                console.log(`[Profile] アクティブなプロファイルが無効でした。最初のプロファイル (ID: ${state.activeProfileId}) をアクティブに設定しました。`);
+            }
+            
+            console.log(`[Profile] ${state.profiles.length}件のプロファイルを読み込みました。アクティブID: ${state.activeProfileId}`);
+            this.applyActiveProfile();
+            uiUtils.updateProfileSwitcherUI();
+
+        } catch (error) {
+            console.error("[Profile] プロファイルの読み込み中に致命的なエラーが発生しました:", error);
+            await uiUtils.showCustomAlert(`プロファイルの読み込みに失敗しました: ${error}`);
+        }
+    },
+
+    applyActiveProfile() {
+        state.activeProfile = state.profiles.find(p => p.id === state.activeProfileId);
+        if (state.activeProfile) {
+            console.log(`[Profile] プロファイル「${state.activeProfile.name}」(ID: ${state.activeProfile.id}) を適用します。`);
+            const { settings } = state.activeProfile;
+            // プロファイルの設定を state.settings にのみ反映させる
+            Object.assign(state.settings, settings);
+            // UIへの適用は、呼び出し元が責務を持つ
+            uiUtils.applySettingsToUI(); 
+            uiUtils.updateProfileCardUI();
+        } else {
+            console.error(`[Profile] 適用すべきアクティブなプロファイル (ID: ${state.activeProfileId}) が見つかりません。`);
+        }
+    },
+
+    async switchProfile(newProfileId) {
+        newProfileId = Number(newProfileId);
+        if (newProfileId === state.activeProfileId) return;
+        
+        console.log(`[Profile] プロファイルを ID: ${newProfileId} に切り替えます。`);
+        await dbUtils.saveSetting('activeProfileId', newProfileId);
+        state.activeProfileId = newProfileId;
+        
+        // プロファイル設定の適用とUI更新のみを行う
+        this.applyActiveProfile();
+        uiUtils.updateProfileSwitcherUI();
+    },
+
+    async saveNewProfile() {
+        if (state.profiles.length >= MAX_PROFILES) {
+            return uiUtils.showCustomAlert(`プロファイルの上限数（${MAX_PROFILES}個）に達しているため、新しいプロファイルを作成できません。`);
+        }
+        const profileName = await uiUtils.showCustomPrompt("新しいプロファイル名を入力してください:", "新規プロファイル");
+        if (!profileName || !profileName.trim()) {
+            console.log("[Profile] 新規保存をキャンセルしました。");
+            return;
+        }
+
+        const currentSettings = this.getCurrentUiSettings();
+        const newProfile = {
+            name: profileName.trim(),
+            icon: state.activeProfile?.icon || null,
+            createdAt: Date.now(),
+            settings: currentSettings
+        };
+
+        try {
+            const newId = await dbUtils.addProfile(newProfile);
+            const newlyAddedProfile = await dbUtils.getProfile(newId);
+            state.profiles.push(newlyAddedProfile); // stateを更新
+            
+            await dbUtils.saveSetting('activeProfileId', newId); // activeProfileIdを更新
+            state.activeProfileId = newId;
+            
+            this.applyActiveProfile();
+            uiUtils.updateProfileSwitcherUI();
+            await uiUtils.showCustomAlert(`プロファイル「${newProfile.name}」を保存しました。`);
+        } catch (error) {
+            console.error("[Profile] 新規プロファイルの保存に失敗しました:", error);
+            await uiUtils.showCustomAlert(`プロファイルの保存に失敗しました: ${error}`);
+        }
+    },
+
+    async updateCurrentProfile() {
+        if (!state.activeProfile) {
+            await uiUtils.showCustomAlert("更新対象のプロファイルが選択されていません。");
+            return;
+        }
+        
+        const updatedProfile = { ...state.activeProfile };
+        updatedProfile.settings = this.getCurrentUiSettings();
+
+        try {
+            await dbUtils.updateProfile(updatedProfile);
+            // state内のプロファイルリストも更新
+            const index = state.profiles.findIndex(p => p.id === updatedProfile.id);
+            if (index !== -1) {
+                state.profiles[index] = updatedProfile;
+            }
+            state.activeProfile = updatedProfile; // アクティブなプロファイルも更新
+            
+            console.log(`[Profile] プロファイル「${updatedProfile.name}」を更新しました。`);
+            this.applyActiveProfile(); // UIに再適用
+            uiUtils.updateProfileSwitcherUI();
+        } catch (error) {
+            console.error("[Profile] プロファイルの更新に失敗しました:", error);
+            await uiUtils.showCustomAlert(`プロファイルの更新に失敗しました: ${error}`);
+        }
+    },
+    
+    async deleteCurrentProfile() {
+        if (!state.activeProfile) return;
+        if (state.profiles.length <= 1) {
+            await uiUtils.showCustomAlert("最後のプロファイルは削除できません。");
+            return;
+        }
+
+        const confirmed = await uiUtils.showCustomConfirm(`本当にプロファイル「${state.activeProfile.name}」を削除しますか？`);
+        if (!confirmed) return;
+
+        try {
+            const idToDelete = state.activeProfileId;
+            await dbUtils.deleteProfile(idToDelete);
+            
+            // stateからも削除
+            state.profiles = state.profiles.filter(p => p.id !== idToDelete);
+            // アイコンURLキャッシュも削除
+            if (state.profileIconUrls.has(idToDelete)) {
+                URL.revokeObjectURL(state.profileIconUrls.get(idToDelete));
+                state.profileIconUrls.delete(idToDelete);
+            }
+
+            // 削除後は残っているリストの最初のプロファイルに切り替える
+            const newActiveId = state.profiles[0].id;
+            await dbUtils.saveSetting('activeProfileId', newActiveId);
+            state.activeProfileId = newActiveId;
+            
+            this.applyActiveProfile();
+            uiUtils.updateProfileSwitcherUI();
+            await uiUtils.showCustomAlert("プロファイルを削除しました。");
+        } catch (error) {
+            console.error("[Profile] プロファイルの削除に失敗しました:", error);
+            await uiUtils.showCustomAlert(`プロファイルの削除に失敗しました: ${error}`);
+        }
+    },
+
+    async editCurrentProfileName() {
+        if (!state.activeProfile) return;
+        const newName = await uiUtils.showCustomPrompt("新しいプロファイル名:", state.activeProfile.name);
+        if (newName && newName.trim() && newName.trim() !== state.activeProfile.name) {
+            state.activeProfile.name = newName.trim();
+            await this.updateCurrentProfile(); // 更新処理を共通化
+        }
+    },
+
+    handleProfileIconChange(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+
+        // 1. 既存のアイコンURLキャッシュがあれば破棄する
+        if (state.activeProfile && state.profileIconUrls.has(state.activeProfile.id)) {
+            const oldUrl = state.profileIconUrls.get(state.activeProfile.id);
+            URL.revokeObjectURL(oldUrl);
+            state.profileIconUrls.delete(state.activeProfile.id);
+            console.log(`[Profile] 古いアイコンキャッシュを破棄しました (ID: ${state.activeProfile.id})`);
+        }
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const blob = new Blob([e.target.result], { type: file.type });
+            if (state.activeProfile) {
+                state.activeProfile.icon = blob;
+                await this.updateCurrentProfile(); // 更新処理を共通化
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    },
+
+    async resetProfileIcon() {
+        if (!state.activeProfile) return;
+        const confirmed = await uiUtils.showCustomConfirm("アイコンをデフォルトに戻しますか？");
+        if (confirmed) {
+            state.activeProfile.icon = null;
+            if (state.profileIconUrls.has(state.activeProfile.id)) {
+                URL.revokeObjectURL(state.profileIconUrls.get(state.activeProfile.id));
+                state.profileIconUrls.delete(state.activeProfile.id);
+            }
+            await this.updateCurrentProfile();
+        }
+    },
+
+    getCurrentUiSettings() {
+        const settings = {};
+        const stringKeys = ['apiKey', 'modelName', 'systemPrompt', 'dummyUser', 'dummyModel', 'additionalModels', 'historySortOrder', 'fontFamily', 'proofreadingModelName', 'proofreadingSystemInstruction', 'googleSearchApiKey', 'googleSearchEngineId', 'headerColor', 'thoughtTranslationModel'];
+        const numberKeys = ['temperature', 'maxTokens', 'topK', 'topP', 'presencePenalty', 'frequencyPenalty', 'thinkingBudget', 'maxRetries', 'fixedRetryDelaySeconds', 'maxBackoffDelaySeconds', 'overlayOpacity', 'messageOpacity'];
+        const booleanKeys = ['enterToSend', 'darkMode', 'hideSystemPromptInChat', 'geminiEnableGrounding', 'geminiEnableFunctionCalling', 'enableSwipeNavigation', 'enableProofreading', 'enableAutoRetry', 'useFixedRetryDelay', 'concatDummyModel', 'includeThoughts', 'enableThoughtTranslation', 'applyDummyToProofread', 'applyDummyToTranslate', 'allowPromptUiChanges', 'forceFunctionCalling'];
+        
+        stringKeys.forEach(key => {
+            const element = elements[key + 'Input'] || elements[key + 'Select'] || elements[key + 'Textarea'];
+            if (element) settings[key] = element.value.trim();
+        });
+        
+        numberKeys.forEach(key => {
+            let element;
+            if (key === 'overlayOpacity' || key === 'messageOpacity') {
+                element = elements[key + 'Slider'];
+            } else {
+                element = elements[key + 'Input'];
+            }
+            
+            if (element) {
+                const value = (key === 'overlayOpacity' || key === 'messageOpacity') ? parseFloat(element.value) / 100 : parseFloat(element.value);
+                settings[key] = isNaN(value) ? null : value;
+            }
+        });
+
+        booleanKeys.forEach(key => {
+            const element = elements[key + 'Checkbox'] || elements[key + 'Toggle'];
+            if (element) settings[key] = element.checked;
+        });
+
+        console.log("[Profile] 現在のUIから設定を取得しました:", settings);
+        return settings;
+    },
+
+    fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64String = reader.result.split(',')[1];
+                resolve(base64String);
+            };
+            reader.onerror = error => reject(error);
+            reader.readAsDataURL(file);
+        });
+    },
+
+    base64ToBlob(base64, mimeType) {
+        return fetch(`data:${mimeType};base64,${base64}`).then(res => res.blob());
+    },
+
+    _prepareApiHistory(baseMessages) {
+        let history = [...baseMessages];
+        if (state.settings.dummyUser) {
+            history.push({ role: 'user', content: state.settings.dummyUser, attachments: [] });
+        }
+        if (state.settings.dummyModel) {
+            history.push({ role: 'model', content: state.settings.dummyModel, attachments: [] });
+        }
+        
+        return history.map(msg => {
+            const parts = [];
+            if (msg.content && msg.content.trim() !== '') {
+                parts.push({ text: msg.content });
+            }
+            if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
+                msg.attachments.forEach(att => parts.push({ inlineData: { mimeType: att.mimeType, data: att.base64Data } }));
+            }
+            if (msg.generated_images && msg.generated_images.length > 0) {
+                msg.generated_images.forEach(img => {
+                    parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+                });
+            }
+            if (msg.role === 'model' && msg.tool_calls) {
+                msg.tool_calls.forEach(toolCall => parts.push({ functionCall: toolCall.functionCall }));
+            }
+            if (msg.role === 'tool') {
+                if (msg.name && msg.response) {
+                    parts.push({ functionResponse: { name: msg.name, response: msg.response } });
+                }
+            }
+            return { role: msg.role === 'tool' ? 'tool' : (msg.role === 'model' ? 'model' : 'user'), parts };
+        }).filter(c => c.parts.length > 0);
+    },
+
+    /**
+     * 画像Blobを受け取り、WebPに変換してimage_storeに保存し、新しいIDを返す
+     * @param {Blob} blob - 保存対象の画像Blob
+     * @returns {Promise<string>} 保存された画像のユニークID
+     */
+    async saveImageBlob(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = async () => {
+                    const canvas = document.createElement('canvas');
+                    // オリジナルと同じサイズで描画
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    // WebPに変換 (品質0.9)
+                    canvas.toBlob(async (webpBlob) => {
+                        if (!webpBlob) {
+                            // WebP変換に失敗した場合(Safariの古いバージョンなど)は元のBlobを保存
+                            console.warn("WebPへの変換に失敗しました。元の形式で保存します。");
+                            webpBlob = blob;
+                        }
+                        
+                        const imageId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                        const imageData = {
+                            id: imageId,
+                            blob: webpBlob,
+                            createdAt: new Date()
+                        };
+
+                        try {
+                            await dbUtils.openDB();
+                            const store = dbUtils._getStore(IMAGE_STORE, 'readwrite');
+                            const request = store.put(imageData);
+                            request.onsuccess = () => resolve(imageId);
+                            request.onerror = (event) => reject(event.target.error);
+                        } catch (dbError) {
+                            reject(dbError);
+                        }
+                    }, 'image/webp', 0.9);
+                };
+                img.onerror = () => reject(new Error("画像データの読み込みに失敗しました。"));
+                img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error("FileReaderでBlobの読み込みに失敗しました。"));
+            reader.readAsDataURL(blob);
+        });
+    },
+
+    imageObserver: null, // 画像遅延読み込み用のIntersectionObserver
+
+    /**
+     * IDを指定してimage_storeから画像Blobを取得する
+     * @param {string} id - 取得する画像のID
+     * @returns {Promise<Blob|null>} 画像のBlobオブジェクト、またはnull
+     */
+    async getImageBlobById(id) {
+        try {
+            await dbUtils.openDB();
+            const store = dbUtils._getStore(IMAGE_STORE, 'readonly');
+            return new Promise((resolve, reject) => {
+                const request = store.get(id);
+                request.onsuccess = (event) => {
+                    resolve(event.target.result ? event.target.result.blob : null);
+                };
+                request.onerror = (event) => reject(event.target.error);
+            });
+        } catch (error) {
+            console.error(`ID(${id})の画像Blob取得エラー:`, error);
+            return null;
+        }
+    },
+
+
+    /**
+     * 古い形式の画像データ（チャット履歴埋め込み）を新しいimage_storeに移行する
+     * @param {IDBTransaction} transaction - onupgradeneededから渡されるトランザクション
+     */
+    async migrateImageData() {
+        console.log("[DB Migration] v11データ移行処理のチェックを開始します...");
+        try {
+            const migrationFlag = await dbUtils.getSetting('v11_migration_complete');
+            if (migrationFlag && migrationFlag.value) {
+                console.log("[DB Migration] v11データ移行は既に完了しています。");
                 return;
             }
-            console.log(`タイマー「${timerName}」の時間切れ応答を生成します。`);
-    
-            // ユーザーには見えない内部的な指示メッセージを作成
-            const systemInstructionForTimer = `[システムメモ]
-    タイマー「${timerName}」が時間切れになりました。
-    この事実を踏まえて、現在の会話の文脈に沿った自然な応答を生成してください。
-    例えば、「そういえば、約束の時間だね」「時間切れだ！イベントが発生する」のように、会話を続けてください。
-    このシステムメモ自体は応答に含めないでください。`;
-    
-            const userMessage = { 
-                role: 'user', 
-                content: systemInstructionForTimer, 
-                timestamp: Date.now(),
-                attachments: [],
-                isHidden: true,
-                isAutoTrigger: true
-            };
-    
-            // 履歴にこの内部メッセージを追加
-            state.currentMessages.push(userMessage);
-            
-            // UIにもメッセージ要素を追加するが、即座に非表示にする
-            const messageIndex = state.currentMessages.length - 1;
-            uiUtils.appendMessage(userMessage.role, userMessage.content, messageIndex);
-            const messageElement = elements.messageContainer.querySelector(`.message[data-index="${messageIndex}"]`);
-            if (messageElement) {
-                messageElement.style.display = 'none';
+
+            console.log("[DB Migration] v11データ移行を開始します...");
+            const allChats = await dbUtils.getAllChats();
+            let migratedImageCount = 0;
+
+            for (const chat of allChats) {
+                let chatModified = false;
+                if (!chat.messages) continue;
+
+                for (const message of chat.messages) {
+                    if (message.generated_images && message.generated_images.length > 0) {
+                        message.imageIds = message.imageIds || [];
+                        for (const imgData of message.generated_images) {
+                            try {
+                                const imageBlob = await this.base64ToBlob(imgData.data, imgData.mimeType);
+                                const newImageId = await this.saveImageBlob(imageBlob);
+                                message.imageIds.push(newImageId);
+                                migratedImageCount++;
+                            } catch (error) {
+                                console.error(`[DB Migration] チャット(id:${chat.id})の画像移行中にエラー:`, error);
+                            }
+                        }
+                        // 移行が完了したら古いキーは削除
+                        delete message.generated_images;
+                        chatModified = true;
+                    }
+                }
+
+                if (chatModified) {
+                    console.log(`[DB Migration] チャット(id:${chat.id})を更新します。`);
+                    await dbUtils.saveChat(chat.title, chat);
+                }
             }
-    
-            // 裏でhandleSendを呼び出す (第3引数 isAutoTrigger を true に設定)
-            await this.handleSend(false, -1, true);
-        },
+
+            console.log(`[DB Migration] v11データ移行が完了しました。合計 ${migratedImageCount} 枚の画像を移行しました。`);
+            await dbUtils.saveSetting('v11_migration_complete', true);
+
+        } catch (error) {
+            console.error("[DB Migration] v11データ移行処理中に致命的なエラーが発生しました:", error);
+        }
+    },
+
+
+
     // アプリ初期化
     async initializeApp() {
-        // marked.jsの設定
         if (typeof marked !== 'undefined') {
+            const renderer = new marked.Renderer();
+            const originalLinkRenderer = renderer.link;
+            renderer.link = (href, title, text) => {
+                const html = originalLinkRenderer.call(renderer, href, title, text);
+                return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ');
+            };
+    
             marked.setOptions({
-                breaks: true, // 改行を<br>に変換
-                gfm: true, // GitHub Flavored Markdown有効化
-                sanitize: true, // HTMLサニタイズ (XSS対策)
-                smartypants: false // スマートクォートなどを無効化
+                renderer: renderer,
+                breaks: true,
+                gfm: true,
+                sanitize: true,
+                smartypants: false
             });
-            console.log("Marked.js設定完了");
+            console.log("Marked.js設定完了 (リンクは新しいタブで開きます)");
         } else {
             console.error("Marked.jsライブラリが読み込まれていません！");
         }
-        // バージョン表示
         elements.appVersionSpan.textContent = APP_VERSION;
-        // PWAインストールプロンプトのデフォルト動作を抑制
         window.addEventListener('beforeinstallprompt', (event) => {
             event.preventDefault();
             console.log('beforeinstallpromptイベントを抑制しました。');
-            // ここで独自のインストールボタンを表示するロジックを追加可能
         });
-
-        // デバッグ用ヘルパー関数をコンソールに登録
+    
         window.debug = {
             getState: () => console.log(state),
             getMemory: () => console.log(state.currentPersistentMemory),
             getChat: async (id) => console.log(await dbUtils.getChat(id || state.currentChatId))
         };
         console.log("デバッグ用ヘルパーを登録しました。コンソールで `debug.getMemory()` を実行できます。");
+    
+        registerServiceWorker();
+    
+        // IntersectionObserverの初期化 (画像遅延読み込み用)
+        this.imageObserver = new IntersectionObserver(async (entries, observer) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    const imageId = img.dataset.imageId;
+                    observer.unobserve(img); // 一度だけ処理
 
-        // 初期画面をチャットに設定 (UI表示のみ、state更新と履歴操作は後で)
-        uiUtils.showScreen('chat');
+                    const blob = await this.getImageBlobById(imageId);
+                    if (blob) {
+                        const objectURL = URL.createObjectURL(blob);
 
-        registerServiceWorker(); // Service Worker登録
+                        img.src = objectURL;
+                        img.alt = '生成された画像';
+
+                    } else {
+                        img.alt = '画像の読み込みに失敗しました';
+                        img.classList.add('load-error');
+                    }
+                }
+            }
+        }, { rootMargin: '200px' });
+
+        // MutationObserverの初期化 (オブジェクトURLのメモリ解放用)
+        const mutationObserver = new MutationObserver((mutationsList) => {
+            for (const mutation of mutationsList) {
+                if (mutation.type === 'childList') {
+                    mutation.removedNodes.forEach(node => {
+                        // ノード自体が画像か、子孫に画像が含まれているかチェック
+                        const imagesToRevoke = [];
+                        if (node.tagName === 'IMG' && node.src.startsWith('blob:')) {
+                            imagesToRevoke.push(node);
+                        } else if (node.querySelectorAll) {
+                            node.querySelectorAll('img[src^="blob:"]').forEach(img => imagesToRevoke.push(img));
+                        }
+                        
+                        imagesToRevoke.forEach(img => {
+                            console.log(`[Memory] DOMから削除された画像のURLを解放します: ${img.src}`);
+                            URL.revokeObjectURL(img.src);
+                        });
+                    });
+                }
+            }
+        });
+        mutationObserver.observe(elements.messageContainer, { childList: true, subtree: true });
 
         try {
-            await dbUtils.openDB(); // DBを開く
-            await dbUtils.loadSettings(); // 設定を読み込む (stateに反映)
-
-            updateCurrentSystemPrompt();
-
-            // 読み込んだ設定に基づいて初期テーマとフォントを適用
-            uiUtils.applyDarkMode();
-            uiUtils.applyFontFamily();
-
-            // 読み込んだ設定に基づいて背景画像を適用
-            if (state.settings.backgroundImageBlob instanceof Blob) {
-                uiUtils.revokeExistingObjectUrl(); // 既存URLがあれば破棄
-                try {
-                     state.backgroundImageUrl = URL.createObjectURL(state.settings.backgroundImageBlob);
-                     document.documentElement.style.setProperty('--chat-background-image', `url(${state.backgroundImageUrl})`);
-                     console.log("読み込んだBlobから背景画像を適用しました。");
-                } catch (e) {
-                     console.error("背景画像のオブジェクトURL作成エラー:", e);
-                     document.documentElement.style.setProperty('--chat-background-image', 'none');
+            await dbUtils.openDB();
+    
+            await this.loadGlobalSettings();
+            await this.loadProfiles();
+    
+            let profiles = await dbUtils.getAllProfiles();
+            if (profiles.length === 0) {
+                console.log("[Migration] プロファイルが存在しないため、旧設定からのデータ移行処理を実行します。");
+                const oldSettingsArray = await new Promise((resolve, reject) => {
+                    const store = dbUtils._getStore(SETTINGS_STORE);
+                    const request = store.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                
+                if (oldSettingsArray.length > 0) {
+                    const oldSettingsObject = {};
+                    oldSettingsArray.forEach(item => {
+                        oldSettingsObject[item.key] = item.value;
+                    });
+    
+                    const initialProfileSettings = { ...state.settings, ...oldSettingsObject };
+                    delete initialProfileSettings.backgroundImageBlob;
+    
+                    const defaultProfile = {
+                        name: "デフォルトプロファイル",
+                        icon: null,
+                        createdAt: Date.now(),
+                        settings: initialProfileSettings
+                    };
+    
+                    const newId = await dbUtils.addProfile(defaultProfile);
+                    
+                    await new Promise((resolve, reject) => {
+                        const store = dbUtils._getStore(SETTINGS_STORE, 'readwrite');
+                        store.clear().onsuccess = () => resolve();
+                        store.transaction.onerror = () => reject(store.transaction.error);
+                    });
+                    await dbUtils.saveSetting('activeProfileId', newId);
+                    
+                    console.log("[Migration] データ移行が完了しました。");
+                } else {
+                    console.log("[Migration] 移行すべき古い設定データが見つかりませんでした。新規プロファイルを作成します。");
                 }
-            } else {
-                // 背景画像がない場合はスタイルをリセット
-                document.documentElement.style.setProperty('--chat-background-image', 'none');
             }
-
-            // 読み込んだ全設定をUIフィールドに適用
-            uiUtils.applySettingsToUI();
-
-            // 最新のチャットを読み込むか、新規チャットを開始
+    
+            await this.loadProfiles();
+    
             const chats = await dbUtils.getAllChats(state.settings.historySortOrder);
             if (chats && chats.length > 0) {
-                await this.loadChat(chats[0].id); // 最新チャットを読み込み
+                await this.loadChat(chats[0].id);
             } else {
-                this.startNewChat(); // 履歴がなければ新規チャット
+                this.startNewChat();
             }
-
-            // 初期状態を履歴スタックに設定 (loadChat/startNewChatの後)
+    
             history.replaceState({ screen: 'chat' }, '', '#chat');
-            state.currentScreen = 'chat'; // stateも初期化
+            state.currentScreen = 'chat';
             console.log("Initial history state set to #chat");
-
+    
         } catch (error) {
             console.error("初期化失敗:", error);
             await uiUtils.showCustomAlert(`アプリの初期化に失敗しました: ${error}`);
-            // 致命的なエラーの場合はアプリ内容をエラー表示に置き換え
             elements.appContainer.innerHTML = `<p style="padding: 20px; text-align: center; color: red;">アプリの起動に失敗しました。</p>`;
         } finally {
-            // max-widthの固定幅をpxで算出
+            elements.chatScreen.style.transform = 'translateX(0)';
+            elements.historyScreen.style.transform = 'translateX(-100%)';
+            elements.settingsScreen.style.transform = 'translateX(100%)';
+            
+            uiUtils.showScreen('chat', true);
+    
             updateMessageMaxWidthVar();
-            // イベントリスナーを設定 (初期履歴設定後)
             this.setupEventListeners();
-            // ズーム状態を初期化
             this.updateZoomState();
-            // UI調整
             uiUtils.adjustTextareaHeight();
-            uiUtils.setSendingState(false); // 送信状態をリセット
+            uiUtils.setSendingState(false);
             uiUtils.scrollToBottom();
         }
-        // --- 画像クリックでモーダル表示 ---
+    },
+
+
+    // イベントリスナーを設定
+    // イベントリスナーを設定
+    setupEventListeners() {
+        if (!this._popstateBound) {
+            window.addEventListener('popstate', this.handlePopState.bind(this));
+            this._popstateBound = true; // 一度だけ登録するためのフラグ
+            console.log("popstate listener added (once).");
+        }
+    
+        this._setupEventListenersCallCount++; // カウンターを増やす
+        console.log(`[Debug Event] setupEventListeners が呼び出されました。(${this._setupEventListenersCallCount}回目)`);
+        if (this._setupEventListenersCallCount > 1) {
+            console.error('%c[CRITICAL_BUG] setupEventListenersが複数回呼び出されています！これがバグの根本原因である可能性が非常に高いです。', 'color: red; font-size: 1.2em; font-weight: bold;');
+        }
+    
+        // --- 画面遷移 ---
+        elements.gotoHistoryBtn.addEventListener('click', () => uiUtils.showScreen('history'));
+        elements.gotoSettingsBtn.addEventListener('click', () => uiUtils.showScreen('settings'));
+        elements.backToChatFromHistoryBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
+        elements.backToChatFromSettingsBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
+    
+        // --- チャット関連 ---
+        elements.newChatBtn.addEventListener('click', () => this.confirmStartNewChat());
+        elements.sendButton.addEventListener('click', () => {
+            if (state.isSending) {
+                this.abortRequest();
+            } else {
+                this.handleSend();
+            }
+        });
+        elements.userInput.addEventListener('input', () => uiUtils.adjustTextareaHeight());
+        elements.userInput.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                if (!elements.sendButton.disabled) this.handleSend();
+                return;
+            }
+            if (state.settings.enterToSend && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                e.preventDefault();
+                if (!elements.sendButton.disabled) this.handleSend();
+            }
+        });
+    
+        // --- システムプロンプト ---
+        elements.systemPromptDetails.addEventListener('toggle', (event) => {
+            if (event.target.open) {
+                this.startEditSystemPrompt();
+            } else if (state.isEditingSystemPrompt) {
+                this.cancelEditSystemPrompt();
+            }
+        });
+        elements.saveSystemPromptBtn.addEventListener('click', () => this.saveCurrentSystemPrompt());
+        elements.cancelSystemPromptBtn.addEventListener('click', () => this.cancelEditSystemPrompt());
+    
+        // --- プロファイルメニューの表示/非表示 ---
+        elements.profileCardHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            uiUtils.toggleProfileMenu('header');
+        });
+        elements.profileCardHeaderSettings.addEventListener('click', (e) => {
+            e.stopPropagation();
+            uiUtils.toggleProfileMenu('settings');
+        });
+    
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            const isHeaderCardClicked = elements.profileCardHeader.contains(target);
+            const isSettingsCardClicked = elements.profileCardHeaderSettings.contains(target);
+            const isHeaderMenuClicked = elements.headerProfileMenu.contains(target);
+            const isSettingsMenuClicked = elements.headerProfileMenuSettings.contains(target);
+    
+            if (!isHeaderCardClicked && !isSettingsCardClicked && !isHeaderMenuClicked && !isSettingsMenuClicked) {
+                elements.headerProfileMenu.classList.add('hidden');
+                elements.headerProfileMenuSettings.classList.add('hidden');
+            }
+        });
+    
+        // --- プロファイル編集 ---
+        elements.profileEditNameBtn.addEventListener('click', () => this.editCurrentProfileName());
+        elements.profileIconInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                this.handleProfileIconChange(file);
+            }
+            e.target.value = null;
+        });
+        elements.profileResetIconBtn.addEventListener('click', () => this.resetProfileIcon());
+        elements.profileSaveNewBtn.addEventListener('click', () => this.saveNewProfile());
+        elements.profileDeleteBtn.addEventListener('click', () => this.deleteCurrentProfile());
+        elements.profileExportBtn.addEventListener('click', () => this.exportProfile());
+        elements.profileImportBtn.addEventListener('click', () => elements.profileImportInput.click());
+        elements.profileImportInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) this.importProfile(file);
+            e.target.value = null;
+        });
+    
+        // --- 設定項目（即時保存） ---
+        const setupInstantSave = (element, key, eventType = 'change') => {
+            if (element) {
+                element.addEventListener(eventType, async () => {
+                    if (!state.activeProfile) return;
+                    let value;
+                    switch (element.type) {
+                        case 'checkbox':
+                            value = element.checked;
+                            break;
+                        case 'range':
+                            value = parseFloat(element.value) / 100;
+                            break;
+                        case 'number':
+                            value = parseFloat(element.value);
+                            if (isNaN(value)) value = null;
+                            break;
+                        default:
+                            value = element.value;
+                            break;
+                    }
+                    
+                    state.settings[key] = value;
+                    state.activeProfile.settings[key] = value;
+                    
+                    await dbUtils.updateProfile(state.activeProfile);
+                    
+                    if (key === 'darkMode') uiUtils.applyDarkMode();
+                    if (key === 'fontFamily') uiUtils.applyFontFamily();
+                    if (key === 'hideSystemPromptInChat') uiUtils.toggleSystemPromptVisibility();
+                    if (key === 'overlayOpacity') uiUtils.applyOverlayOpacity();
+                    if (key === 'headerColor') uiUtils.applyHeaderColor();
+                    if (key === 'messageOpacity') document.documentElement.style.setProperty('--message-bubble-opacity', String(value));
+                    if (key === 'modelName') uiUtils.updateModelWarningMessage();
+    
+                });
+            } else {
+                console.warn(`❌ [Debug Settings] '${key}' に対応するDOM要素が見つかりません。`);
+            }
+        };
+        
+        const settingsMap = {
+            apiKey: { element: elements.apiKeyInput, event: 'input' },
+            modelName: { element: elements.modelNameSelect, event: 'change' },
+            systemPrompt: { element: elements.systemPromptDefaultTextarea, event: 'input' },
+            temperature: { element: elements.temperatureInput, event: 'input' },
+            maxTokens: { element: elements.maxTokensInput, event: 'input' },
+            topK: { element: elements.topKInput, event: 'input' },
+            topP: { element: elements.topPInput, event: 'input' },
+            presencePenalty: { element: elements.presencePenaltyInput, event: 'input' },
+            frequencyPenalty: { element: elements.frequencyPenaltyInput, event: 'input' },
+            thinkingBudget: { element: elements.thinkingBudgetInput, event: 'input' },
+            includeThoughts: { element: elements.includeThoughtsToggle, event: 'change' },
+            enableThoughtTranslation: { element: elements.enableThoughtTranslationCheckbox, event: 'change' },
+            thoughtTranslationModel: { element: elements.thoughtTranslationModelSelect, event: 'change' },
+            dummyUser: { element: elements.dummyUserInput, event: 'input' },
+            applyDummyToProofread: { element: elements.applyDummyToProofreadCheckbox, event: 'change' },
+            applyDummyToTranslate: { element: elements.applyDummyToTranslateCheckbox, event: 'change' },
+            dummyModel: { element: elements.dummyModelInput, event: 'input' },
+            concatDummyModel: { element: elements.concatDummyModelCheckbox, event: 'change' },
+            additionalModels: { element: elements.additionalModelsTextarea, event: 'input' },
+            enterToSend: { element: elements.enterToSendCheckbox, event: 'change' },
+            historySortOrder: { element: elements.historySortOrderSelect, event: 'change' },
+            darkMode: { element: elements.darkModeToggle, event: 'change' },
+            fontFamily: { element: elements.fontFamilyInput, event: 'input' },
+            hideSystemPromptInChat: { element: elements.hideSystemPromptToggle, event: 'change' },
+            geminiEnableGrounding: { element: elements.geminiEnableGroundingToggle, event: 'change' },
+            geminiEnableFunctionCalling: { element: elements.geminiEnableFunctionCallingToggle, event: 'change' },
+            enableSwipeNavigation: { element: elements.swipeNavigationToggle, event: 'change' },
+            enableProofreading: { element: elements.enableProofreadingCheckbox, event: 'change' },
+            proofreadingModelName: { element: elements.proofreadingModelNameSelect, event: 'change' },
+            proofreadingSystemInstruction: { element: elements.proofreadingSystemInstructionTextarea, event: 'input' },
+            enableAutoRetry: { element: elements.enableAutoRetryCheckbox, event: 'change' },
+            maxRetries: { element: elements.maxRetriesInput, event: 'input' },
+            useFixedRetryDelay: { element: elements.useFixedRetryDelayCheckbox, event: 'change' },
+            fixedRetryDelaySeconds: { element: elements.fixedRetryDelayInput, event: 'input' },
+            maxBackoffDelaySeconds: { element: elements.maxBackoffDelayInput, event: 'input' },
+            googleSearchApiKey: { element: elements.googleSearchApiKeyInput, event: 'input' },
+            googleSearchEngineId: { element: elements.googleSearchEngineIdInput, event: 'input' },
+            overlayOpacity: { element: elements.overlayOpacitySlider, event: 'input' },
+            messageOpacity: { element: elements.messageOpacitySlider, event: 'input' },
+            headerColor: { element: elements.headerColorInput, event: 'input' },
+            allowPromptUiChanges: { element: document.getElementById('allow-prompt-ui-changes'), event: 'change' },
+            forceFunctionCalling: { element: elements.forceFunctionCallingToggle, event: 'change' },
+            autoScroll: { element: elements.autoScrollToggle, event: 'change' }
+        };
+    
+        for (const key in settingsMap) {
+            const { element, event } = settingsMap[key];
+            setupInstantSave(element, key, event);
+        }
+    
+        // --- その他 ---
+        elements.importHistoryBtn.addEventListener('click', () => elements.importHistoryInput.click());
+        elements.importHistoryInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) this.handleHistoryImport(file);
+            event.target.value = null;
+        });
+    
+        elements.includeThoughtsToggle.addEventListener('change', () => {
+            const isEnabled = elements.includeThoughtsToggle.checked;
+            elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !isEnabled);
+        });
+        
+        elements.updateAppBtn.addEventListener('click', () => this.updateApp());
+        elements.clearDataBtn.addEventListener('click', () => this.confirmClearAllData());
+    
+        elements.enableProofreadingCheckbox.addEventListener('change', () => {
+            const isEnabled = elements.enableProofreadingCheckbox.checked;
+            elements.proofreadingOptionsDiv.classList.toggle('hidden', !isEnabled);
+        });
+    
+        elements.uploadBackgroundBtn.addEventListener('click', () => elements.backgroundImageInput.click());
+        elements.backgroundImageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) this.handleBackgroundImageUpload(file);
+            event.target.value = null;
+        });
+        elements.deleteBackgroundBtn.addEventListener('click', () => this.confirmDeleteBackgroundImage());
+        
+        elements.resetHeaderColorBtn.addEventListener('click', () => {
+            state.settings.headerColor = '';
+            elements.headerColorInput.value = state.settings.darkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
+            // headerColorの'change'イベントリスナーが自動で保存と適用を行うため、ここでは値をリセットするだけ
+            const event = new Event('input', { bubbles: true });
+            elements.headerColorInput.dispatchEvent(event);
+        });
+        
         elements.messageContainer.addEventListener('click', (event) => {
-            // クリックされたのが画像(IMGタグ)で、かつメッセージコンテント内であるか確認
             if (event.target.tagName === 'IMG' && event.target.closest('.message-content')) {
-                // Step 1で追加したHTML要素を取得
                 const modalOverlay = document.getElementById('image-modal-overlay');
                 const modalImg = document.getElementById('image-modal-img');
                 
                 if (modalOverlay && modalImg) {
-                    modalImg.src = event.target.src; // クリックされた画像のURLをモーダルにセット
-                    modalOverlay.classList.remove('hidden'); // モーダルを表示する
+                    modalImg.src = event.target.src;
+                    modalOverlay.classList.remove('hidden');
                 }
             }
         });
+    
+        document.body.addEventListener('click', (event) => {
+            if (!elements.messageContainer.contains(event.target)) {
+                const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
+                if (currentlyShown) {
+                    currentlyShown.classList.remove('show-actions');
+                }
+            }
+        }, true); 
+    
+        if ('visualViewport' in window) {
+            window.visualViewport.addEventListener('resize', this.updateZoomState.bind(this));
+            window.visualViewport.addEventListener('scroll', this.updateZoomState.bind(this));
+        } else {
+            console.warn("VisualViewport API is not supported in this browser.");
+        }
+        
+        elements.attachFileBtn.addEventListener('click', () => uiUtils.showFileUploadDialog());
+    
+        // モバイルでのファイルキャッシュ問題を回避するため、毎回input要素を動的に生成する
+        elements.selectFilesBtn.addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.multiple = true;
+            fileInput.style.display = 'none';
 
-        // --- モーダルを閉じるイベントリスナー ---
+            fileInput.addEventListener('change', (event) => {
+                this.handleFileSelection(event.target.files);
+                document.body.removeChild(fileInput); // 使い終わったら要素を削除
+            });
+
+            document.body.appendChild(fileInput);
+            fileInput.click();
+        });
+
+        elements.confirmAttachBtn.addEventListener('click', () => this.confirmAttachment());
+        elements.cancelAttachBtn.addEventListener('click', () => this.cancelAttachment());
+        elements.fileUploadDialog.addEventListener('close', () => {
+            if (elements.fileUploadDialog.returnValue !== 'ok') {
+                this.cancelAttachment();
+            }
+        });
+        document.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button && !button.disabled) {
+                this.createRipple(e, button);
+            }
+        });
+        let menuHideTimer = null;
+        const MENU_HIDE_DELAY = 300;
+    
+        const showMenu = (messageElement) => {
+            clearTimeout(menuHideTimer);
+            const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
+            if (currentlyShown && currentlyShown !== messageElement) {
+                currentlyShown.classList.remove('show-actions');
+            }
+            if (!messageElement.classList.contains('editing')) {
+                messageElement.classList.add('show-actions');
+            }
+        };
+    
+        const hideMenu = (messageElement) => {
+            menuHideTimer = setTimeout(() => {
+                if (messageElement) {
+                    messageElement.classList.remove('show-actions');
+                }
+            }, MENU_HIDE_DELAY);
+        };
+    
+        elements.messageContainer.addEventListener('mouseover', (event) => {
+            const messageElement = event.target.closest('.message');
+            if (messageElement) {
+                showMenu(messageElement);
+            }
+        });
+    
+        elements.messageContainer.addEventListener('mouseout', (event) => {
+            const messageElement = event.target.closest('.message');
+            if (messageElement) {
+                const relatedTarget = event.relatedTarget;
+                if (!relatedTarget || (!messageElement.contains(relatedTarget) && !relatedTarget.closest('.message-actions') && !relatedTarget.closest('.message-cascade-controls'))) {
+                    hideMenu(messageElement);
+                }
+            }
+        });
+    
+        elements.messageContainer.addEventListener('mouseover', (event) => {
+            const menuElement = event.target.closest('.message-actions, .message-cascade-controls');
+            if (menuElement) {
+                const messageElement = menuElement.closest('.message');
+                if (messageElement) {
+                    showMenu(messageElement);
+                }
+            }
+        });
+    
+        elements.messageContainer.addEventListener('mouseout', (event) => {
+            const menuElement = event.target.closest('.message-actions, .message-cascade-controls');
+            if (menuElement) {
+                const messageElement = menuElement.closest('.message');
+                const relatedTarget = event.relatedTarget;
+                if (messageElement && (!relatedTarget || !messageElement.contains(relatedTarget))) {
+                    hideMenu(messageElement);
+                }
+            }
+        });
+    
+        const chatScreen = elements.chatScreen;
+    
+        chatScreen.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!state.isSending) {
+                chatScreen.classList.add('drag-over');
+            }
+        });
+    
+        chatScreen.addEventListener('dragleave', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.relatedTarget === null || !chatScreen.contains(event.relatedTarget)) {
+                chatScreen.classList.remove('drag-over');
+            }
+        });
+    
+        chatScreen.addEventListener('drop', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            chatScreen.classList.remove('drag-over');
+    
+            if (state.isSending) return;
+    
+            const files = event.dataTransfer.files;
+            if (files && files.length > 0) {
+                console.log(`${files.length}個のファイルがドロップされました。`);
+                this.handleFileSelection(files);
+                uiUtils.showFileUploadDialog();
+            }
+        });
+    
+        const fileUploadDialog = elements.fileUploadDialog;
+    
+        fileUploadDialog.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    
+        fileUploadDialog.addEventListener('dragleave', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    
+        fileUploadDialog.addEventListener('drop', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+    
+            if (state.isSending) return;
+    
+            const files = event.dataTransfer.files;
+            if (files && files.length > 0) {
+                console.log(`${files.length}個のファイルがダイアログにドロップされました。`);
+                this.handleFileSelection(files);
+                uiUtils.updateSelectedFilesUI();
+            }
+        });
+    
         const modalOverlay = document.getElementById('image-modal-overlay');
         const modalCloseBtn = document.getElementById('image-modal-close');
         
         if (modalOverlay && modalCloseBtn) {
-            // 右上の「×」ボタンをクリックした時の処理
             modalCloseBtn.addEventListener('click', () => {
                 modalOverlay.classList.add('hidden');
             });
             
-            // オーバーレイの背景部分をクリックした時の処理
             modalOverlay.addEventListener('click', (event) => {
-                // 画像自体をクリックした場合は閉じないようにする
                 if (event.target === modalOverlay) {
                     modalOverlay.classList.add('hidden');
                 }
@@ -2571,338 +3707,41 @@ const appLogic = {
             elements.fixedRetryDelayContainer.classList.toggle('hidden', !useFixed);
             elements.maxBackoffDelayContainer.classList.toggle('hidden', useFixed);
         });
-    },
-
-    // イベントリスナーを設定
-    setupEventListeners() {
-        // ナビゲーションボタン
-        elements.gotoHistoryBtn.addEventListener('click', () => uiUtils.showScreen('history'));
-        elements.gotoSettingsBtn.addEventListener('click', () => uiUtils.showScreen('settings'));
-        // 戻るボタンは history.back() を使用
-        elements.backToChatFromHistoryBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
-        elements.backToChatFromSettingsBtn.addEventListener('click', () => uiUtils.showScreen('chat'));
-
-        // チャットアクション
-        elements.newChatBtn.addEventListener('click', async () => {
-            // 現在のチャットを保存するか確認
-            const confirmed = await uiUtils.showCustomConfirm("現在のチャットを保存して新規チャットを開始しますか？");
-            if (confirmed) this.confirmStartNewChat();
+    
+        // --- モデル選択時の警告表示リスナー ---
+        elements.modelNameSelect.addEventListener('change', () => {
+            uiUtils.updateModelWarningMessage();
         });
-        elements.sendButton.addEventListener('click', () => {
-            if (state.isSending) this.abortRequest(); // 送信中なら中断
-            else this.handleSend(); // そうでなければ送信
-        });
-        elements.userInput.addEventListener('input', () => uiUtils.adjustTextareaHeight()); // 入力時に高さ調整
-        elements.userInput.addEventListener('keypress', (e) => {
-            // Enterで送信 (Shift+Enterは除く)
-            if (state.settings.enterToSend && e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // デフォルトの改行動作を抑制
-                if (!elements.sendButton.disabled) this.handleSend(); // 送信ボタンが有効なら送信
-            }
-        });
-
-        // システムプロンプトUIアクション
-        elements.systemPromptDetails.addEventListener('toggle', (event) => {
-            if (event.target.open) {
-                // 開いたときに編集モードに入る
-                this.startEditSystemPrompt();
-            } else if (state.isEditingSystemPrompt) {
-                // 閉じられたときに編集中だったらキャンセル
-                this.cancelEditSystemPrompt();
-            }
-        });
-        elements.saveSystemPromptBtn.addEventListener('click', () => this.saveCurrentSystemPrompt());
-        elements.cancelSystemPromptBtn.addEventListener('click', () => this.cancelEditSystemPrompt());
-        elements.systemPromptEditor.addEventListener('input', () => {
-            uiUtils.adjustTextareaHeight(elements.systemPromptEditor, 200); // 高さ調整
-        });
-
-        // 履歴アクション
-        elements.importHistoryBtn.addEventListener('click', () => elements.importHistoryInput.click());
-        elements.importHistoryInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (file) this.handleHistoryImport(file);
-            event.target.value = null; // 同じファイルを選択できるようにリセット
-        });
-
-        // 「Include Thoughts」トグルの変更を監視
-        elements.includeThoughtsToggle.addEventListener('change', () => {
-            const isEnabled = elements.includeThoughtsToggle.checked;
-            elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !isEnabled);
-        });
-
-        // 設定アクション
-        elements.saveSettingsBtns.forEach(button => {
-            button.addEventListener('click', () => this.saveSettings());
-        });
-        if (elements.overlayOpacitySlider) {
-            elements.overlayOpacitySlider.addEventListener('input', (e) => {
-                const raw = Number(e.target.value) || 0;      // 0〜95（あなたのUI仕様）
-                const clamped = Math.max(0, Math.min(95, raw));
-                const v = clamped / 100;                      // 0.00〜0.95
-                state.settings.overlayOpacity = v;
-                dbUtils.saveSetting('overlayOpacity', v).catch(console.error);
-          
-              // パーセント表示を即更新
-              if (elements.overlayOpacityValue) {
-                elements.overlayOpacityValue.textContent = `${Math.round(v * 100)}%`;
-              }
-          
-              // state にも反映（保存は「設定を保存」で）
-              if (state?.settings) state.settings.overlayOpacity = v;
-          
-              // 見た目へ即反映（あなたの実装を呼ぶ）
-              if (typeof uiUtils?.applyOverlayOpacity === 'function') {
-                uiUtils.applyOverlayOpacity();
-              } else {
-                // 念のため：直接CSS変数を更新（関数が無い場合）
-                document.documentElement.style.setProperty('--overlay-opacity', String(v));
-              }
-            });
-          }
-        // メッセージ濃さのリアルタイム反映
-        if (elements.messageOpacitySlider) {
-            elements.messageOpacitySlider.addEventListener('input', (e) => {
-            const raw = Number(e.target.value) || 100;   // 10〜100
-            const clamped = Math.max(10, Math.min(100, raw));
-            const v = clamped / 100;                     // 0.10〜1.00
-            state.settings.messageOpacity = v;
-            dbUtils.saveSetting('messageOpacity', v).catch(console.error);
-        
-            if (elements.messageOpacityValue) {
-                elements.messageOpacityValue.textContent = `${clamped}%`;
-            }
-            // CSS変数へ即反映（style.css 側で --message-bubble-opacity を使用）
-            document.documentElement.style.setProperty('--message-bubble-opacity', String(v));
-        
-            // state にも即時反映（保存は「設定を保存」で行う）
-            if (state?.settings) state.settings.messageOpacity = v;
-            });
-        }
-        
-        elements.updateAppBtn.addEventListener('click', () => this.updateApp());
-        elements.clearDataBtn.addEventListener('click', () => this.confirmClearAllData());
-
-        elements.enableProofreadingCheckbox.addEventListener('change', () => {
-            const isEnabled = elements.enableProofreadingCheckbox.checked;
-            elements.proofreadingOptionsDiv.classList.toggle('hidden', !isEnabled);
-        });
-
-        // ダークモード切り替えリスナー
-        elements.darkModeToggle.addEventListener('change', () => {
-            state.settings.darkMode = elements.darkModeToggle.checked; // stateを即時更新
-            uiUtils.applyDarkMode(); // テーマを即時適用
-            // 注意: 変更は「設定を保存」ボタンクリック時にDBに保存される
-        });
-
-         // 背景画像ボタンリスナー
-        elements.uploadBackgroundBtn.addEventListener('click', () => elements.backgroundImageInput.click()); // ファイル選択ダイアログを開く
-        elements.backgroundImageInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (file) this.handleBackgroundImageUpload(file);
-            event.target.value = null; // 同じファイルを選択できるようにリセット
-        });
-        elements.deleteBackgroundBtn.addEventListener('click', () => this.confirmDeleteBackgroundImage());
-
-        if (elements.messageOpacitySlider) {
-            elements.messageOpacitySlider.addEventListener('input', (e) => {
-              const raw = Number(e.target.value) || 100;     // 10〜100
-              const clamped = Math.max(10, Math.min(100, raw));
-              const v = clamped / 100;                       // 0.10〜1.00
-              // 画面の表示
-              if (elements.messageOpacityValue) {
-                elements.messageOpacityValue.textContent = `${clamped}%`;
-              }
-              // CSS変数に即反映
-              document.documentElement.style.setProperty('--message-bubble-opacity', String(v));
-              // state も即時更新（あなたの保存ロジックに合わせて）
-              if (state?.settings) state.settings.messageOpacity = v;
-            });
-          }
-        
-
-        // ヘッダーカラーピッカーのリアルタイム更新
-        elements.headerColorInput.addEventListener('input', () => {
-            const newColor = elements.headerColorInput.value;
-            state.settings.headerColor = newColor; // stateをリアルタイム更新
-            uiUtils.applyHeaderColor(); // CSS変数をリアルタイム更新
-        });
-
-        // ヘッダーカラーリセットボタン
-        elements.resetHeaderColorBtn.addEventListener('click', () => {
-            state.settings.headerColor = ''; // stateをリセット
-            // UIをデフォルト値に戻して再適用
-            elements.headerColorInput.value = state.settings.darkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
-            uiUtils.applyHeaderColor();
-        });
-
-        // SP非表示トグルリスナー
-        elements.hideSystemPromptToggle.addEventListener('change', () => {
-            state.settings.hideSystemPromptInChat = elements.hideSystemPromptToggle.checked;
-            uiUtils.toggleSystemPromptVisibility(); // UIを即時更新
-            // 注意: DBへの保存は「設定を保存」ボタンで行われる
-        });
-        
-        // --- メッセージクリックで操作ボックス表示/非表示 ---
-        elements.messageContainer.addEventListener('click', (event) => {
-            const clickedMessage = event.target.closest('.message');
-
-            // 操作ボックス内のボタンがクリックされた場合は何もしない
-            if (event.target.closest('.message-actions button, .message-cascade-controls button')) {
-                return;
-            }
-
-            // クリックされたのがメッセージ要素の場合
-            if (clickedMessage) {
-                // すでに表示されている他のメッセージがあれば非表示にする
-                const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                if (currentlyShown && currentlyShown !== clickedMessage) {
-                    currentlyShown.classList.remove('show-actions');
+        window.addEventListener('beforeunload', () => {
+            const revokeUrls = (cache, name) => {
+                if (cache.size > 0) {
+                    console.log(`[Memory] ページ離脱のため、${cache.size}個の${name}URLを解放します。`);
+                    for (const url of cache.values()) {
+                        if (url.startsWith('blob:')) {
+                            URL.revokeObjectURL(url);
+                        }
+                    }
+                    cache.clear();
                 }
-
-                // クリックされたメッセージの表示状態をトグル
-                // (編集中はトグルしないようにする)
-                if (!clickedMessage.classList.contains('editing')) {
-                    clickedMessage.classList.toggle('show-actions');
-                }
-            } else {
-                // メッセージコンテナ内だがメッセージ要素以外がクリックされた場合
-                // (メッセージ間の余白など)
-                // 表示中の操作ボックスがあれば非表示にする
-                const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                if (currentlyShown) {
-                    currentlyShown.classList.remove('show-actions');
-                }
-            }
-        });
-
-        // --- メッセージコンテナ外クリックで操作ボックスを非表示 ---
-        document.body.addEventListener('click', (event) => {
-            // クリックがメッセージコンテナの外で発生した場合
-            if (!elements.messageContainer.contains(event.target)) {
-                // 表示中の操作ボックスがあれば非表示にする
-                const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                if (currentlyShown) {
-                    currentlyShown.classList.remove('show-actions');
-                }
-            }
-            // メッセージコンテナ内のクリックは上記のリスナーで処理される
-        }, true); 
-
-        // スワイプイベントリスナー (チャット画面のみ)
-        // passive: false にして preventDefault を呼べるようにする (必要に応じて)
-        elements.chatScreen.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: true }); // passive: trueのまま、moveで必要なら変更
-        elements.chatScreen.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false }); // 横スワイプ判定時にpreventDefaultするため false
-        elements.chatScreen.addEventListener('touchend', this.handleTouchEnd.bind(this));
-
-        // VisualViewport APIリスナー (ズーム状態監視)
-        if ('visualViewport' in window) {
-            window.visualViewport.addEventListener('resize', this.updateZoomState.bind(this));
-            window.visualViewport.addEventListener('scroll', this.updateZoomState.bind(this));
-        } else {
-            console.warn("VisualViewport API is not supported in this browser.");
-            // フォールバックが必要な場合の処理 (例: ピンチジェスチャーを簡易的に検出するなど)
-        }
-
-        // popstate イベントリスナー (戻るボタン/ジェスチャー対応)
-        window.addEventListener('popstate', this.handlePopState.bind(this));
-        console.log("popstate listener added.");
-        
-        // ファイルアップロード関連のイベントリスナー
-        elements.attachFileBtn.addEventListener('click', () => uiUtils.showFileUploadDialog());
-        elements.selectFilesBtn.addEventListener('click', () => elements.fileInput.click());
-         // fileInput の change イベントリスナー
-        elements.fileInput.addEventListener('change', (event) => {
-            this.handleFileSelection(event.target.files);
-            // 処理が終わったら input の値をリセットする
-            event.target.value = null;
-        });
-        elements.confirmAttachBtn.addEventListener('click', () => this.confirmAttachment());
-        elements.cancelAttachBtn.addEventListener('click', () => this.cancelAttachment());
-        // ダイアログ自体を閉じた時もキャンセル扱い
-        elements.fileUploadDialog.addEventListener('close', () => {
-            if (elements.fileUploadDialog.returnValue !== 'ok') {
-                this.cancelAttachment(); // OK以外で閉じたらキャンセル
-            }
-        });
-        document.addEventListener('click', (e) => {
-            const button = e.target.closest('button');
-            if (button && !button.disabled) {
-                this.createRipple(e, button);
-            }
-        });
-        // --- Delayed Menu Hiding Logic ---
-        let menuHideTimer = null;
-        const MENU_HIDE_DELAY = 300; // 300ミリ秒の遅延
-
-        const showMenu = (messageElement) => {
-            clearTimeout(menuHideTimer);
-            // 他のメニューが表示されていれば非表示にする
-            const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-            if (currentlyShown && currentlyShown !== messageElement) {
-                currentlyShown.classList.remove('show-actions');
-            }
-            if (!messageElement.classList.contains('editing')) {
-                messageElement.classList.add('show-actions');
-            }
-        };
-
-        const hideMenu = (messageElement) => {
-            menuHideTimer = setTimeout(() => {
-                if (messageElement) {
-                    messageElement.classList.remove('show-actions');
-                }
-            }, MENU_HIDE_DELAY);
-        };
-
-        elements.messageContainer.addEventListener('mouseover', (event) => {
-            const messageElement = event.target.closest('.message');
-            if (messageElement) {
-                showMenu(messageElement);
-            }
-        });
-
-        elements.messageContainer.addEventListener('mouseout', (event) => {
-            const messageElement = event.target.closest('.message');
-            if (messageElement) {
-                // マウスがメニュー自体に移動した場合も考慮
-                const relatedTarget = event.relatedTarget;
-                if (!relatedTarget || (!messageElement.contains(relatedTarget) && !relatedTarget.closest('.message-actions') && !relatedTarget.closest('.message-cascade-controls'))) {
-                    hideMenu(messageElement);
-                }
-            }
-        });
-
-        // メニュー自体にマウスが入った/出た時の処理も追加
-        elements.messageContainer.addEventListener('mouseover', (event) => {
-            const menuElement = event.target.closest('.message-actions, .message-cascade-controls');
-            if (menuElement) {
-                const messageElement = menuElement.closest('.message');
-                if (messageElement) {
-                    showMenu(messageElement); // タイマーをクリア
-                }
-            }
-        });
-
-        elements.messageContainer.addEventListener('mouseout', (event) => {
-            const menuElement = event.target.closest('.message-actions, .message-cascade-controls');
-            if (menuElement) {
-                const messageElement = menuElement.closest('.message');
-                const relatedTarget = event.relatedTarget;
-                if (messageElement && (!relatedTarget || !messageElement.contains(relatedTarget))) {
-                    hideMenu(messageElement);
-                }
-            }
+            };
+            
+            revokeUrls(state.profileIconUrls, 'アイコン');
+            revokeUrls(state.videoUrlCache, '動画');
+            revokeUrls(state.imageUrlCache, 'チャット画像');
         });
     },
+    
 
     // popstateイベントハンドラ (戻るボタン/ジェスチャー)
     handlePopState(event) {
-        // 履歴スタックから遷移先の画面名を取得、なければチャット画面
-        const targetScreen = event.state?.screen || 'chat';
-        console.log(`popstate event fired: Navigating to screen '${targetScreen}' from history state.`);
-        // showScreenを呼び出す (fromPopState = true を渡して履歴操作を抑制)
-        uiUtils.showScreen(targetScreen, true);
+    const targetScreen = event.state?.screen || 'chat';
+    if (targetScreen === state.currentScreen) {
+      console.log(`[popstate] same screen -> ignore: ${targetScreen}`);
+      return;
+    }
+    console.log(`popstate event fired: Navigating to screen '${targetScreen}' from history state.`);
+    // showScreenを呼び出す (fromPopState = true を渡して履歴操作を抑制)
+    uiUtils.showScreen(targetScreen, true);
     },
 
     // ズーム状態を更新
@@ -2997,7 +3836,6 @@ const appLogic = {
                 uiUtils.showScreen('settings'); // showScreenが履歴操作を行う
             } else { // 右スワイプ (左から右へ) -> 履歴画面へ
                 console.log("右スワイプ検出 -> 履歴画面へ");
-                uiUtils.showScreen('history'); // showScreenが履歴操作を行う
             }
         } else {
             // 閾値未満または縦移動が大きい場合は何もしない
@@ -3019,106 +3857,113 @@ const appLogic = {
 
     // 新規チャット開始の確認と実行
     async confirmStartNewChat() {
-        // 送信中なら中断確認
+        const confirmed = await uiUtils.showCustomConfirm("現在のチャットを保存して新規チャットを開始しますか？");
+        if (!confirmed) {
+            console.log("新規チャットの開始をキャンセルしました。");
+            return;
+        }
+
+        // 送信中なら中断
         if (state.isSending) {
-            const confirmed = await uiUtils.showCustomConfirm("送信中です。中断して新規チャットを開始しますか？");
-            if (!confirmed) return;
-            this.abortRequest(); // 送信中断
+            this.abortRequest();
         }
-        // 編集中なら破棄確認
+        // 編集中なら破棄
         if (state.editingMessageIndex !== null) {
-            const confirmed = await uiUtils.showCustomConfirm("編集中です。変更を破棄して新規チャットを開始しますか？");
-            if (!confirmed) return;
             const msgEl = elements.messageContainer.querySelector(`.message[data-index="${state.editingMessageIndex}"]`);
-            this.cancelEditMessage(state.editingMessageIndex, msgEl); // 編集キャンセル
+            this.cancelEditMessage(state.editingMessageIndex, msgEl);
         }
-        // システムプロンプト編集中なら破棄確認
+        // システムプロンプト編集中なら破棄
         if (state.isEditingSystemPrompt) {
-            const confirmed = await uiUtils.showCustomConfirm("システムプロンプト編集中です。変更を破棄して新規チャットを開始しますか？");
-            if (!confirmed) return;
             this.cancelEditSystemPrompt();
         }
-        
-        // 保留中の添付ファイルがあれば破棄確認
+        // 保留中の添付ファイルがあれば破棄
         if (state.pendingAttachments.length > 0) {
-            const confirmedAttach = await uiUtils.showCustomConfirm("添付準備中のファイルがあります。破棄して新規チャットを開始しますか？");
-            if (!confirmedAttach) return;
-            state.pendingAttachments = []; // 破棄
-            uiUtils.updateAttachmentBadgeVisibility(); // バッジ状態更新
+            state.pendingAttachments = [];
+            uiUtils.updateAttachmentBadgeVisibility();
         }
         
-        // 現在のチャットにメッセージまたはシステムプロンプトがあり、IDもあれば保存を試みる
-        if ((state.currentMessages.length > 0 || state.currentSystemPrompt) && state.currentChatId) {
-            try {
+        try {
+            // 現在のチャットに保存すべき内容があれば保存する
+            if ((state.currentMessages.length > 0 || state.currentSystemPrompt) && state.currentChatId) {
                 await dbUtils.saveChat();
-            } catch (error) {
-                console.error("新規チャット開始前のチャット保存失敗:", error);
-                const conf = await uiUtils.showCustomConfirm("現在のチャットの保存に失敗しました。新規チャットを開始しますか？");
-                if (!conf) return; // 保存失敗時にキャンセルされたら中断
             }
+        } catch (error) {
+            console.error("新規チャット開始前のチャット保存失敗:", error);
+            // 保存に失敗しても、ユーザーは新規チャットを望んでいるので処理は続行
+            await uiUtils.showCustomAlert("現在のチャットの保存に失敗しました。");
         }
+
         // 新規チャットを開始
         this.startNewChat();
-        uiUtils.showScreen('chat'); // チャット画面を表示 (URLハッシュも更新)
+        uiUtils.showScreen('chat');
     },
 
     // 新規チャットを開始する (状態リセット)
     startNewChat() {
-        state.currentChatId = null; // IDリセット
-        state.currentMessages = []; // メッセージクリア
-        state.currentSystemPrompt = state.settings.systemPrompt; // デフォルトのシステムプロンプトを適用
-        state.pendingAttachments = []; // 保留中の添付ファイルをクリア
-        state.currentPersistentMemory = {}; // 永続メモリをリセット
-        state.currentScene = { scene_id: "initial", location: "不明な場所" }; // シーン情報を初期化
-        uiUtils.updateSystemPromptUI(); // システムプロンプトUI更新
-        uiUtils.renderChatMessages(); // 表示クリア
-        uiUtils.updateChatTitle(); // タイトルを「新規チャット」に
-        elements.userInput.value = ''; // 入力欄クリア
-        uiUtils.adjustTextareaHeight(); // 高さ調整
-        uiUtils.setSendingState(false); // 送信状態リセット
+        state.currentChatId = null;
+        state.currentMessages = [];
+        state.currentSystemPrompt = state.settings.systemPrompt || ''; 
+        state.pendingAttachments = [];
+        state.currentPersistentMemory = {};
+        state.currentScene = { scene_id: "initial", location: "不明な場所" };
+        uiUtils.updateSystemPromptUI();
+        uiUtils.renderChatMessages();
+        uiUtils.updateChatTitle();
+        elements.userInput.value = '';
+        uiUtils.adjustTextareaHeight();
+        uiUtils.setSendingState(false);
         state.currentStyleProfiles = {};
     },
 
-    // 指定IDのチャットを読み込む
+    // app.js の appLogic オブジェクト内
+
     async loadChat(id) {
-        // 送信中なら中断確認
+        const loadChatStartTime = performance.now();
+        console.log(`%c[PERF_DEBUG] loadChat: START - チャットID ${id} の読み込み処理を開始...`, 'color: red; font-weight: bold;');
+
+        console.log(`%c[Debug LoadChat] START: チャットID ${id} の読み込みを開始...`, 'color: blue; font-weight: bold;');
+        console.log(`[Debug LoadChat] 1. 読み込み前の state.currentMessages.length: ${state.currentMessages.length}`);
+
+        state.currentMessages = [];
+        console.log(`[Debug LoadChat] 2. state.currentMessages をクリアしました。 length: ${state.currentMessages.length}`);
+
         if (state.isSending) {
             const confirmed = await uiUtils.showCustomConfirm("送信中です。中断して別のチャットを読み込みますか？");
             if (!confirmed) return;
             this.abortRequest();
         }
-        // 編集中なら破棄確認
         if (state.editingMessageIndex !== null) {
             const confirmed = await uiUtils.showCustomConfirm("編集中です。変更を破棄して別のチャットを読み込みますか？");
             if (!confirmed) return;
             const msgEl = elements.messageContainer.querySelector(`.message[data-index="${state.editingMessageIndex}"]`);
             this.cancelEditMessage(state.editingMessageIndex, msgEl);
         }
-        // システムプロンプト編集中なら破棄確認
         if (state.isEditingSystemPrompt) {
             const confirmed = await uiUtils.showCustomConfirm("システムプロンプト編集中です。変更を破棄して別のチャットを読み込みますか？");
             if (!confirmed) return;
             this.cancelEditSystemPrompt();
         }
-        // 保留中の添付ファイルがあれば破棄確認
         if (state.pendingAttachments.length > 0) {
             const confirmedAttach = await uiUtils.showCustomConfirm("添付準備中のファイルがあります。破棄して別のチャットを読み込みますか？");
             if (!confirmedAttach) return;
-            state.pendingAttachments = []; // 破棄
-            uiUtils.updateAttachmentBadgeVisibility(); // バッジ状態更新
+            state.pendingAttachments = [];
+            uiUtils.updateAttachmentBadgeVisibility();
         }
 
         try {
-            const chat = await dbUtils.getChat(id); // DBからチャット取得
+            const dbGetStartTime = performance.now();
+            const chat = await dbUtils.getChat(id);
+            const dbGetEndTime = performance.now();
+            console.log(`%c[PERF_DEBUG] loadChat: DBからのデータ取得完了 (所要時間: ${dbGetEndTime - dbGetStartTime}ms)`, 'color: red; font-weight: bold;');
+            
             if (chat) {
                 state.currentChatId = chat.id;
-                // attachments も含めて読み込む (DBに保存されていれば)
                 state.currentMessages = chat.messages?.map(msg => ({
                     ...msg,
-                    attachments: msg.attachments || [] // attachmentsがなければ空配列
+                    attachments: msg.attachments || []
                 })) || [];
-
-                // 永続メモリを読み込む (存在しなければ空オブジェクト)
+                console.log(`[Debug LoadChat] 3. DBから新しいチャットを読み込みました。 new length: ${state.currentMessages.length}`);
+                
                 state.currentPersistentMemory = chat.persistentMemory || {};
 
                 let needsSave = false;
@@ -3127,11 +3972,9 @@ const appLogic = {
                     const siblings = state.currentMessages.filter(m => m.siblingGroupId === gid);
                     const selected = siblings.filter(m => m.isSelected);
                     if (selected.length === 0 && siblings.length > 0) {
-                        // 選択されているものがない -> 最後のものを選択状態にする
                         siblings[siblings.length - 1].isSelected = true;
                         needsSave = true;
                     } else if (selected.length > 1) {
-                        // 複数選択されている -> 最後のもの以外を解除
                         selected.slice(0, -1).forEach(m => m.isSelected = false);
                         needsSave = true;
                     }
@@ -3139,9 +3982,19 @@ const appLogic = {
                 
                 state.currentSystemPrompt = chat.systemPrompt !== undefined ? chat.systemPrompt : state.settings.systemPrompt;
                 state.pendingAttachments = [];
-                uiUtils.updateSystemPromptUI();
-                uiUtils.renderChatMessages();
+                
                 uiUtils.updateChatTitle(chat.title);
+                uiUtils.updateSystemPromptUI();
+                
+                console.log(`[Debug LoadChat] 4. renderChatMessages を呼び出します...`);
+
+                const renderStartTime = performance.now();
+                uiUtils.renderChatMessages();
+                const renderEndTime = performance.now();
+                console.log(`%c[PERF_DEBUG] loadChat: renderChatMessages DOM再構築完了 (所要時間: ${renderEndTime - renderStartTime}ms)`, 'color: red; font-weight: bold;');
+                
+                uiUtils.scrollToBottom();
+
                 elements.userInput.value = '';
                 uiUtils.adjustTextareaHeight();
                 uiUtils.setSendingState(false);
@@ -3151,9 +4004,7 @@ const appLogic = {
                     await dbUtils.saveChat();
                 }
 
-                history.replaceState({ screen: 'chat' }, '', '#chat');
-                state.currentScreen = 'chat';
-                console.log("チャット読み込み完了:", id, "履歴状態を #chat に設定");
+                console.log(`%c[Debug LoadChat] END: チャット読み込み完了: ${id}`, 'color: blue; font-weight: bold;');
             } else {
                 await uiUtils.showCustomAlert("チャット履歴が見つかりませんでした。");
                 this.startNewChat();
@@ -3162,9 +4013,13 @@ const appLogic = {
         } catch (error) {
             await uiUtils.showCustomAlert(`チャットの読み込みエラー: ${error}`);
             this.startNewChat();
-            uiUtils.showScreen('chat');
+
         }
+        const loadChatEndTime = performance.now();
+        console.log(`%c[PERF_DEBUG] loadChat: END - 全処理完了 (合計所要時間: ${loadChatEndTime - loadChatStartTime}ms)`, 'color: red; font-weight: bold;');
     },
+
+
 
     // チャットを複製
     async duplicateChat(id) {
@@ -3249,6 +4104,92 @@ const appLogic = {
         }
     },
 
+    async exportProfile() {
+        if (!state.activeProfile) {
+            return uiUtils.showCustomAlert("エクスポートするプロファイルが選択されていません。");
+        }
+        
+        // stateのデータを汚染しないようにディープコピーする
+        const profileToExport = JSON.parse(JSON.stringify(state.activeProfile));
+        
+        // アイコンBlobがあればBase64に変換して埋め込む
+        if (state.activeProfile.icon instanceof Blob) {
+            try {
+                const base64Icon = await this.fileToBase64(state.activeProfile.icon);
+                profileToExport.icon = {
+                    mimeType: state.activeProfile.icon.type,
+                    data: base64Icon
+                };
+            } catch (error) {
+                console.error("アイコンのBase64変換に失敗:", error);
+                return uiUtils.showCustomAlert("アイコンのエクスポート処理に失敗しました。");
+            }
+        }
+
+        delete profileToExport.id; // DBのIDは不要なので削除
+
+        const jsonString = JSON.stringify(profileToExport, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const safeName = profileToExport.name.replace(/[\\/:*?"<>|]/g, '_');
+        a.href = url;
+        a.download = `${safeName}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    async importProfile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                if (state.profiles.length >= MAX_PROFILES) {
+                    return uiUtils.showCustomAlert(`プロファイルの上限数（${MAX_PROFILES}個）に達しているため、プロファイルをインポートできません。`);
+                }
+                const importedData = JSON.parse(event.target.result);
+
+                if (!importedData.name || !importedData.settings) {
+                    throw new Error("無効なファイルです。'name'と'settings'プロパティが必要です。");
+                }
+
+                let newProfile = { ...importedData };
+                
+                if (newProfile.icon && newProfile.icon.data) {
+                    try {
+                        newProfile.icon = await this.base64ToBlob(newProfile.icon.data, newProfile.icon.mimeType);
+                    } catch (error) {
+                        console.error("インポート時のアイコン復元に失敗:", error);
+                        newProfile.icon = null;
+                    }
+                }
+
+                let finalName = newProfile.name;
+                const existingNames = state.profiles.map(p => p.name);
+                while (existingNames.includes(finalName)) {
+                    finalName = `${IMPORT_PREFIX}${finalName}`;
+                }
+                newProfile.name = finalName;
+
+                const newId = await dbUtils.addProfile(newProfile);
+                const newlyAddedProfile = await dbUtils.getProfile(newId);
+                state.profiles.push(newlyAddedProfile);
+                
+                uiUtils.updateProfileSwitcherUI();
+                await uiUtils.showCustomAlert(`プロファイル「${finalName}」をインポートしました。`);
+
+            } catch (error) {
+                console.error("プロファイルのインポートに失敗:", error);
+                await uiUtils.showCustomAlert(`プロファイルのインポートに失敗しました: ${error.message}`);
+            }
+        };
+        reader.readAsText(file);
+    },
+
+
+
     // チャットをテキストファイルとしてエクスポート
     async exportChat(chatId, chatTitle) {
         const confirmed = await uiUtils.showCustomConfirm(`チャット「${chatTitle || 'この履歴'}」をテキスト出力しますか？`);
@@ -3256,21 +4197,17 @@ const appLogic = {
     
         try {
             let chatToExport;
-
-            // 現在表示中のチャットをエクスポートする場合、DBからではなく最新のstateからデータを取得する
             if (state.currentChatId === chatId) {
-                console.log("エクスポート: 現在のチャットをstateから直接エクスポートします。");
                 chatToExport = {
                     id: state.currentChatId,
-                    title: chatTitle, // UIから渡された最新のタイトルを使用
+                    title: chatTitle,
                     messages: state.currentMessages,
                     systemPrompt: state.currentSystemPrompt,
-                    persistentMemory: state.currentPersistentMemory, // 最新のメモリを使用
-                    createdAt: null, // createdAtはDBから読み込まないと不明だが、エクスポートには必須ではない
+                    persistentMemory: state.currentPersistentMemory,
+                    createdAt: null,
                     updatedAt: Date.now(),
                 };
             } else {
-                console.log(`エクスポート: チャットID ${chatId} をDBから読み込みます。`);
                 chatToExport = await dbUtils.getChat(chatId);
             }
     
@@ -3280,8 +4217,40 @@ const appLogic = {
             }
     
             let exportText = '';
+            const imageDataBlock = {};
+            const allImageIds = new Set();
+
+            // 1. 全メッセージから必要な画像IDを収集
+            if (chatToExport.messages) {
+                chatToExport.messages.forEach(msg => {
+                    if (msg.imageIds && msg.imageIds.length > 0) {
+                        msg.imageIds.forEach(id => allImageIds.add(id));
+                    }
+                });
+            }
+
+            // 2. 画像IDを元にDBから画像データを取得し、Base64に変換
+            if (allImageIds.size > 0) {
+                uiUtils.setLoadingIndicatorText('画像データを収集中...');
+                elements.loadingIndicator.classList.remove('hidden');
+                for (const imageId of allImageIds) {
+                    try {
+                        const blob = await this.getImageBlobById(imageId);
+                        if (blob) {
+                            const base64Data = await this.fileToBase64(blob);
+                            imageDataBlock[imageId] = {
+                                mimeType: blob.type,
+                                data: base64Data
+                            };
+                        }
+                    } catch (e) {
+                        console.error(`エクスポート中に画像(ID: ${imageId})の処理に失敗しました:`, e);
+                    }
+                }
+                elements.loadingIndicator.classList.add('hidden');
+            }
     
-            // persistentMemory をメタデータとして出力
+            // 3. テキストコンテンツを生成
             if (chatToExport.persistentMemory && Object.keys(chatToExport.persistentMemory).length > 0) {
                 try {
                     const metadataJson = JSON.stringify(chatToExport.persistentMemory, null, 2);
@@ -3291,12 +4260,10 @@ const appLogic = {
                 }
             }
     
-            // システムプロンプトを出力
             if (chatToExport.systemPrompt) {
                 exportText += `<|#|system|#|>\n${chatToExport.systemPrompt}\n<|#|/system|#|>\n\n`;
             }
     
-            // メッセージを出力
             if (chatToExport.messages) {
                 chatToExport.messages.forEach(msg => {
                     if (msg.role === 'user' || msg.role === 'model') {
@@ -3304,14 +4271,22 @@ const appLogic = {
                         if (msg.role === 'model') {
                             if (msg.isCascaded) attributes += ' isCascaded';
                             if (msg.isSelected) attributes += ' isSelected';
+                            if (msg.imageIds && msg.imageIds.length > 0) {
+                                attributes += ` imageIds="${msg.imageIds.join(',')}"`;
+                            }
                         }
                         if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
                             const fileNames = msg.attachments.map(a => a.name).join(';');
                             attributes += ` attachments="${fileNames.replace(/"/g, '&quot;')}"`;
                         }
-                        exportText += `<|#|${msg.role}|#|${attributes}>\n${msg.content}\n<|#|/${msg.role}|#|>\n\n`;
+                        exportText += `<|#|${msg.role}|#|${attributes.trim()}>\n${msg.content}\n<|#|/${msg.role}|#|>\n\n`;
                     }
                 });
+            }
+
+            // 4. 画像データブロックを追記
+            if (Object.keys(imageDataBlock).length > 0) {
+                exportText += `<|#|imagedata|#|>\n${JSON.stringify(imageDataBlock, null, 2)}\n<|#|/imagedata|#|>\n`;
             }
     
             const blob = new Blob([exportText.trim()], { type: 'text/plain;charset=utf-8' });
@@ -3327,8 +4302,11 @@ const appLogic = {
             console.log("チャットエクスポート完了:", chatId);
         } catch (error) {
             await uiUtils.showCustomAlert(`エクスポートエラー: ${error}`);
+        } finally {
+            elements.loadingIndicator.classList.add('hidden');
         }
     },
+
 
 
     // チャット削除の確認と実行 (メッセージペア全体)
@@ -3477,9 +4455,9 @@ const appLogic = {
                 if (attempt === 0) {
                     uiUtils.setLoadingIndicatorText('校正中...');
                 } else if (attempt === 1) {
-                    uiUtils.setLoadingIndicatorText('校正を再試行中...');
+                    uiUtils.setLoadingIndicatorText('校正処理を再試行中...');
                 } else {
-                    uiUtils.setLoadingIndicatorText(`校正を${attempt}回目の再試行中...`);
+                    uiUtils.setLoadingIndicatorText(`校正処理${attempt}回目の再試行中...`);
                 }
 
                 const response = await fetch(endpoint, {
@@ -3531,256 +4509,278 @@ const appLogic = {
         throw lastError;
     },
 
-    async handleSend(isRetry = false, retryUserMessageIndex = -1, isAutoTrigger = false) {
-        console.log("--- handleSend: 処理開始 ---", { isRetry, retryUserMessageIndex, isAutoTrigger });
+    
+    /**
+         * @private API通信と応答解析、ループ処理に責務を特化した内部関数。
+         * stateの変更やUIの更新は一切行わない。
+         * @param {Array} messagesForApi - APIに送信するメッセージ履歴。
+         * @param {object} generationConfig - 生成設定。
+         * @param {object} systemInstruction - システムプロンプト。
+         * @returns {Promise<Array>} 生成された新しいメッセージオブジェクトの配列。
+         */
+    async _internalHandleSend(messagesForApi, generationConfig, systemInstruction, streamingIndex) { 
+        let loopCount = 0;
+        const MAX_LOOPS = 10;
+        const turnResults = [];
+        let currentTurnHistory = [...messagesForApi];
+        let aggregatedSearchResults = [];
+        
+        uiUtils.setLoadingIndicatorText('応答生成中...');
 
-        if (state.isSending) { console.warn("handleSend: 既に送信中のため処理を中断"); return; }
+        const convertToApiFormat = (msg) => {
+            const parts = [];
+            if (msg.content && msg.content.trim() !== '') parts.push({ text: msg.content });
+            if (msg.role === 'model' && msg.tool_calls) {
+                msg.tool_calls.forEach(toolCall => parts.push({ functionCall: toolCall.functionCall }));
+            }
+            if (msg.role === 'tool') {
+                if (msg.name && msg.response) {
+                    parts.push({ functionResponse: { name: msg.name, response: msg.response } });
+                }
+            }
+            return { role: msg.role === 'tool' ? 'tool' : 'model', parts };
+        };
+
+        while (loopCount < MAX_LOOPS) {
+            const isFirstCallInLoop = loopCount === 0;
+            loopCount++;
+
+            const result = await this.callApiWithRetry({
+                messagesForApi: currentTurnHistory,
+                generationConfig,
+                systemInstruction,
+                tools: window.functionDeclarations,
+                isFirstCall: isFirstCallInLoop
+            });
+
+            const modelMessage = {
+                role: 'model',
+                content: result.content || '',
+                thoughtSummary: result.thoughtSummary,
+                tool_calls: result.toolCalls,
+                generated_images: result.images || [], 
+                timestamp: Date.now(),
+                finishReason: result.finishReason,
+                safetyRatings: result.safetyRatings,
+                groundingMetadata: result.groundingMetadata,
+                usageMetadata: result.usageMetadata,
+                retryCount: result.retryCount,
+                executedFunctions: []
+            };
+            turnResults.push(modelMessage);
+
+            if (!result.toolCalls || result.toolCalls.length === 0) {
+                break; 
+            }
+            
+            uiUtils.setLoadingIndicatorText('関数実行中...');
+
+            const historyForFunctions = state.currentMessages.slice(0, -1);
+            const { toolResults, containsTerminalAction, search_results, internalUiActions } = await this.executeToolCalls(result.toolCalls, historyForFunctions);
+            
+            if (search_results && search_results.length > 0) {
+                aggregatedSearchResults.push(...search_results);
+            }
+            
+            if (internalUiActions && internalUiActions.length > 0) {
+                console.log(`[Debug] _internalHandleSend: executeToolCallsから ${internalUiActions.length} 件のUIアクションを受信`);
+                if (toolResults.length > 0) {
+                    const lastToolResult = toolResults[toolResults.length - 1];
+                    if (!lastToolResult._internal_ui_action) {
+                        lastToolResult._internal_ui_action = [];
+                    }
+                    lastToolResult._internal_ui_action.push(...internalUiActions);
+                    console.log(`[Debug] _internalHandleSend: ツール結果にUIアクションを紐付けました`, lastToolResult._internal_ui_action);
+                }
+            }
+            
+            turnResults.push(...toolResults);
+            
+            const executedFunctionNames = toolResults.map(tr => tr.name);
+            const lastModelMsg = turnResults.filter(m => m.role === 'model').pop();
+            if(lastModelMsg) {
+                lastModelMsg.executedFunctions.push(...executedFunctionNames);
+            }
+
+            const modelMessageForApi = convertToApiFormat(modelMessage);
+            const toolResultsForApi = toolResults.map(convertToApiFormat);
+            currentTurnHistory.push(modelMessageForApi, ...toolResultsForApi);
+
+            if (containsTerminalAction) {
+                console.log("終端アクションが検出されたため、Function Callingループを終了します。");
+                break;
+            }
+            uiUtils.setLoadingIndicatorText('応答生成中...');
+        }
+
+        if (loopCount >= MAX_LOOPS) {
+            throw new Error("AIが同じ操作を繰り返しているようです。処理を中断しました。");
+        }
+
+        const finalModelMessages = turnResults.filter(m => m.role === 'model');
+        if (finalModelMessages.length > 0) {
+            if (aggregatedSearchResults.length > 0) {
+                const lastMessage = finalModelMessages[finalModelMessages.length - 1];
+                lastMessage.search_web_results = aggregatedSearchResults;
+            }
+
+            if (state.settings.enableProofreading) {
+                const lastTextResponse = finalModelMessages.filter(m => m.content && !m.tool_calls).pop();
+                if (lastTextResponse) {
+                    try {
+                        uiUtils.setLoadingIndicatorText('校正中...');
+                        lastTextResponse.content = await this.proofreadText(lastTextResponse.content);
+                    } catch (proofreadError) {
+                        console.error("校正処理中にエラーが発生しました。校正前のテキストを使用します。", proofreadError);
+                    }
+                }
+            }
+
+            if (state.settings.enableThoughtTranslation) {
+                for (const msg of finalModelMessages) {
+                    if (msg.thoughtSummary) {
+                        try {
+                            uiUtils.setLoadingIndicatorText('思考プロセスを翻訳中...');
+                            msg.thoughtSummary = await apiUtils.translateText(msg.thoughtSummary, state.settings.thoughtTranslationModel);
+                        } catch (translateError) {
+                            console.error("思考プロセスの翻訳中にエラーが発生しました。原文を使用します。", translateError);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return turnResults;
+    },
+
+
+    /**
+     * @private _internalHandleSendから返されたメッセージ配列を単一のオブジェクトに集約する。
+     */
+    _aggregateMessages(messages) {
+        const finalAggregatedMessage = {
+            role: 'model',
+            content: '',
+            thoughtSummary: '',
+            executedFunctions: [],
+            imageIds: [], // generated_images の代わりに imageIds を使用
+            generated_videos: [], 
+            timestamp: Date.now(),
+        };
+
+        messages.forEach(msg => {
+            if (msg.role === 'model') {
+                if (msg.content) finalAggregatedMessage.content += msg.content;
+                if (msg.thoughtSummary) finalAggregatedMessage.thoughtSummary += msg.thoughtSummary;
+                if (msg.executedFunctions) finalAggregatedMessage.executedFunctions.push(...msg.executedFunctions);
+                
+                if (msg.search_web_results) {
+                    if (!finalAggregatedMessage.search_web_results) {
+                        finalAggregatedMessage.search_web_results = [];
+                    }
+                    finalAggregatedMessage.search_web_results.push(...msg.search_web_results);
+                }
+
+                Object.assign(finalAggregatedMessage, {
+                    finishReason: msg.finishReason,
+                    safetyRatings: msg.safetyRatings,
+                    groundingMetadata: msg.groundingMetadata,
+                    usageMetadata: msg.usageMetadata,
+                    retryCount: msg.retryCount,
+                });
+            }
+
+            if (msg._internal_ui_action) {
+                const actions = Array.isArray(msg._internal_ui_action) ? msg._internal_ui_action : [msg._internal_ui_action];
+                actions.forEach(action => {
+                    if (action.type === 'display_generated_images' && action.imageIds) {
+                        finalAggregatedMessage.imageIds.push(...action.imageIds);
+                    }
+                    if (action.type === 'display_generated_videos' && action.videos) {
+                        finalAggregatedMessage.generated_videos.push(...action.videos);
+                    }
+                });
+            }
+        });
+        
+        console.log("[Debug] 集約後の最終メッセージオブジェクト:", JSON.stringify(finalAggregatedMessage, null, 2));
+
+        return finalAggregatedMessage;
+    },
+    
+    async handleSend() {
+        if (state.isSending) { return; }
         if (state.editingMessageIndex !== null) { await uiUtils.showCustomAlert("他のメッセージを編集中です。"); return; }
         if (state.isEditingSystemPrompt) { await uiUtils.showCustomAlert("システムプロンプトを編集中です。"); return; }
 
-        const lastMessage = state.currentMessages[state.currentMessages.length - 1];
-        if (lastMessage && lastMessage.role === 'error') {
-            state.currentMessages.pop();
-            uiUtils.renderChatMessages();
-            console.log("末尾のエラーメッセージをクリアしました。");
-        }
+        const text = elements.userInput.value.trim();
+        const attachmentsToSend = [...state.pendingAttachments];
+        if (!text && attachmentsToSend.length === 0) return;
 
         uiUtils.setSendingState(true);
+        uiUtils.setLoadingIndicatorText('応答生成中...');
+        
+        const userMessage = { role: 'user', content: text, timestamp: Date.now(), attachments: attachmentsToSend };
+        state.currentMessages.push(userMessage);
+        uiUtils.appendMessage(userMessage.role, userMessage.content, state.currentMessages.length - 1, false, null, userMessage.attachments);
+        
+        const baseHistory = state.currentMessages.filter(msg => !msg.isCascaded || msg.isSelected);
+        const historyForApi = this._prepareApiHistory(baseHistory);
+
+        const modelMessage = { role: 'model', content: '', timestamp: Date.now() };
+        state.currentMessages.push(modelMessage);
+        const modelMessageIndex = state.currentMessages.length - 1;
+        uiUtils.appendMessage(modelMessage.role, modelMessage.content, modelMessageIndex, true);
+
+        state.pendingAttachments = [];
+        state.selectedFilesForUpload = [];
+        uiUtils.updateAttachmentBadgeVisibility();
+        elements.userInput.value = '';
+        uiUtils.adjustTextareaHeight();
+        if (state.settings.autoScroll) {
+            uiUtils.scrollToBottom();
+        }
+        
+        await dbUtils.saveChat();
         
         try {
-            if (!isRetry && !isAutoTrigger) {
-                const text = elements.userInput.value.trim();
-                const attachmentsToSend = [...state.pendingAttachments];
-                if (!text && attachmentsToSend.length === 0) {
-                    uiUtils.setSendingState(false);
-                    return;
-                }
-                const userMessage = { role: 'user', content: text, timestamp: Date.now(), attachments: attachmentsToSend };
-                state.currentMessages.push(userMessage);
-                uiUtils.appendMessage(userMessage.role, userMessage.content, state.currentMessages.length - 1, false, null, userMessage.attachments);
-                elements.userInput.value = '';
-                state.pendingAttachments = [];
-                uiUtils.updateAttachmentBadgeVisibility();
-                uiUtils.adjustTextareaHeight();
-                uiUtils.scrollToBottom();
+            const generationConfig = {};
+            if (state.settings.temperature !== null) generationConfig.temperature = state.settings.temperature;
+            if (state.settings.maxTokens !== null) generationConfig.maxOutputTokens = state.settings.maxTokens;
+            if (state.settings.topK !== null) generationConfig.topK = state.settings.topK;
+            if (state.settings.topP !== null) generationConfig.topP = state.settings.topP;
+            if (state.settings.thinkingBudget !== null || state.settings.includeThoughts) {
+                generationConfig.thinkingConfig = {};
+                if(state.settings.thinkingBudget !== null) generationConfig.thinkingConfig.thinkingBudget = state.settings.thinkingBudget;
+                if(state.settings.includeThoughts) generationConfig.thinkingConfig.includeThoughts = true;
             }
+            const systemInstruction = state.currentSystemPrompt?.trim() ? { role: "system", parts: [{ text: state.currentSystemPrompt.trim() }] } : null;
+
+            const newMessages = await this._internalHandleSend(historyForApi, generationConfig, systemInstruction);
+            
+            const finalAggregatedMessage = this._aggregateMessages(newMessages);
+            state.currentMessages[modelMessageIndex] = finalAggregatedMessage;
+
+            // API応答後、全再描画で最終結果を反映
+            uiUtils.renderChatMessages(() => uiUtils.scrollToBottom());
 
             await dbUtils.saveChat();
-            
-            let loopCount = 0;
-            const MAX_LOOPS = 10;
-            const executedFunctionNamesInTurn = [];
-            
-            let finalModelMessage = null; 
-
-            while (loopCount < MAX_LOOPS) {
-                loopCount++;
-                uiUtils.setLoadingIndicatorText('応答中...');
-
-                const messagesForApiSource = isRetry 
-                    ? state.currentMessages.slice(0, retryUserMessageIndex + 1)
-                    : state.currentMessages;
-
-                const filteredMessages = messagesForApiSource.filter(msg => {
-                    if (msg.role === 'user' || msg.role === 'tool' || msg.role === 'error') {
-                        return true;
-                    }
-                    if (msg.role === 'model') {
-                        if (!msg.isCascaded) {
-                            return true;
-                        }
-                        if (msg.isCascaded && msg.isSelected) {
-                            return true;
-                        }
-                    }
-                    return false;
-                });
-
-                const messagesForApi = filteredMessages.map(msg => {
-                    const parts = [];
-                    if (msg.content && msg.content.trim() !== '') parts.push({ text: msg.content });
-                    if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
-                        msg.attachments.forEach(att => parts.push({ inlineData: { mimeType: att.mimeType, data: att.base64Data } }));
-                    }
-                    if (msg.role === 'model' && msg.tool_calls) {
-                        msg.tool_calls.forEach(toolCall => parts.push({ functionCall: toolCall.functionCall }));
-                    }
-                    if (msg.role === 'tool') {
-                        if (msg.name && msg.response) {
-                            parts.push({ functionResponse: { name: msg.name, response: msg.response } });
-                        } else {
-                            console.warn("handleSend: nameまたはresponseが欠けた不完全なtoolメッセージをスキップしました。", msg);
-                        }
-                    }
-                    return { role: msg.role === 'tool' ? 'tool' : (msg.role === 'model' ? 'model' : 'user'), parts };
-                }).filter(c => c.parts.length > 0 && (c.role === 'user' || c.role === 'model' || c.role === 'tool'));
-
-                const generationConfig = {};
-                if (state.settings.temperature !== null) generationConfig.temperature = state.settings.temperature;
-                if (state.settings.maxTokens !== null) generationConfig.maxOutputTokens = state.settings.maxTokens;
-                if (state.settings.topK !== null) generationConfig.topK = state.settings.topK;
-                if (state.settings.topP !== null) generationConfig.topP = state.settings.topP;
-                
-                let finalSystemPrompt = state.currentSystemPrompt?.trim() || '';
-                if (state.currentScene) {
-                    const sceneParts = [];
-                    if (state.currentScene.location) sceneParts.push(`場所: ${state.currentScene.location}`);
-                    if (state.currentScene.time_of_day) sceneParts.push(`時間帯: ${state.currentScene.time_of_day}`);
-                    if (state.currentScene.mood) sceneParts.push(`雰囲気: ${state.currentScene.mood}`);
-                    if (state.currentScene.pov) sceneParts.push(`視点: ${state.currentScene.pov === 'first' ? '一人称' : '三人称'}`);
-                    if (state.currentScene.notes) sceneParts.push(`補足: ${state.currentScene.notes}`);
-
-                    if (sceneParts.length > 0) {
-                        const sceneHeaderText = "\n\n--- [現在のシーン設定] ---";
-                        finalSystemPrompt += `${sceneHeaderText}\n${sceneParts.join("\n")}`;
-                    }
-                }
-                const systemInstruction = finalSystemPrompt ? { role: "system", parts: [{ text: finalSystemPrompt }] } : null;
-
-                const result = await this.callApiWithRetry({
-                    messagesForApi,
-                    generationConfig,
-                    systemInstruction,
-                    tools: window.functionDeclarations,
-                    isFunctionCallingSequence: loopCount > 1
-                });
-
-                console.log("--- API応答メタデータ ---", { 
-                    finishReason: result.finishReason, 
-                    safetyRatings: result.safetyRatings,
-                    retryCount: result.retryCount
-                });
-                
-                let finalContent = result.content;
-
-                if (state.settings.enableProofreading && finalContent && finalContent.trim() !== '') {
-                    try {
-                        const proofreadContent = await this.proofreadText(finalContent);
-                        console.log("校正適用完了。");
-                        finalContent = proofreadContent;
-                    } catch (proofreadError) {
-                        console.error("校正処理中にエラーが発生しました。元のテキストを使用します。", proofreadError);
-                    }
-                }
-
-                const modelMessage = {
-                    role: 'model',
-                    content: finalContent,
-                    thoughtSummary: result.thoughtSummary,
-                    tool_calls: result.toolCalls,
-                    timestamp: Date.now(),
-                    finishReason: result.finishReason,
-                    safetyRatings: result.safetyRatings,
-                    groundingMetadata: result.groundingMetadata,
-                    usageMetadata: result.usageMetadata,
-                    retryCount: result.retryCount
-                };
-                
-                if (!result.toolCalls || result.toolCalls.length === 0) {
-                    if (executedFunctionNamesInTurn.length > 0) {
-                        modelMessage.executedFunctions = executedFunctionNamesInTurn;
-                    }
-                    
-                    finalModelMessage = modelMessage;
-                    break;
-                }
-
-                modelMessage.tool_calls = result.toolCalls;
-                state.currentMessages.push(modelMessage);
-                
-                result.toolCalls.forEach(toolCall => {
-                    if (toolCall.functionCall?.name) {
-                        executedFunctionNamesInTurn.push(toolCall.functionCall.name);
-                    }
-                });
-
-                uiUtils.setLoadingIndicatorText('関数実行中...');
-                const toolResults = await this.executeToolCalls(result.toolCalls);
-                state.currentMessages.push(...toolResults);
-                await dbUtils.saveChat();
-            }
-
-            if (loopCount >= MAX_LOOPS) {
-                console.error("Function Callingの最大ループ回数に達しました。処理を中断します。");
-                throw new Error("AIが同じ操作を繰り返しているようです。処理を中断しました。");
-            }
-            
-            if (finalModelMessage) {
-                if (state.settings.enableThoughtTranslation && finalModelMessage.thoughtSummary) {
-                    uiUtils.setLoadingIndicatorText('思考プロセスを翻訳中...');
-                    const translatedThought = await apiUtils.translateText(finalModelMessage.thoughtSummary, state.settings.thoughtTranslationModel);
-                    finalModelMessage.thoughtSummary = translatedThought;
-                }
-                
-                if (isRetry) {
-                    const firstResponseIndex = retryUserMessageIndex + 1;
-                    let existingVisibleSiblings = [];
-                    let siblingGroupIdToUse = null;
-
-                    if (firstResponseIndex < state.currentMessages.length) {
-                        const firstPotentialSibling = state.currentMessages.find((msg, i) => i >= firstResponseIndex && msg.role === 'model' && !msg.tool_calls);
-                        siblingGroupIdToUse = firstPotentialSibling?.siblingGroupId || `gid-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                        
-                        for (let i = firstResponseIndex; i < state.currentMessages.length; i++) {
-                            const msg = state.currentMessages[i];
-                            if (msg.role === 'user') break;
-                            if (msg.role === 'model' && !msg.tool_calls) {
-                                existingVisibleSiblings.push(msg);
-                            }
-                        }
-                    } else {
-                        siblingGroupIdToUse = `gid-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                    }
-
-                    existingVisibleSiblings.forEach(msg => {
-                        msg.isCascaded = true;
-                        msg.isSelected = false;
-                        msg.siblingGroupId = siblingGroupIdToUse;
-                    });
-                    finalModelMessage.isCascaded = true;
-                    finalModelMessage.isSelected = true;
-                    finalModelMessage.siblingGroupId = siblingGroupIdToUse;
-                }
-                
-                state.currentMessages.push(finalModelMessage);
-                
-                uiUtils.renderChatMessages();
-                await dbUtils.saveChat();
-                console.log("最終的なメッセージを表示し、保存しました。");
-            }
 
         } catch(error) {
             console.error("--- handleSend: 最終catchブロックでエラー捕捉 ---", error);
-            const errorMessage = error.message || "不明なエラーが発生しました。";
+            const errorMessage = (error.name !== 'AbortError') ? (error.message || "不明なエラーが発生しました。") : "リクエストがキャンセルされました。";
             
-            // ★ 修正: AbortErrorの場合、stateにエラーメッセージを追加するだけにする
-            if (error.name === 'AbortError') {
-                console.log("--- handleSend: リクエストが正常にキャンセルされました。---");
-                state.currentMessages.push({ role: 'error', content: "リクエストがキャンセルされました。", timestamp: Date.now() });
-            } else {
-                uiUtils.displayError(errorMessage, true);
-                state.currentMessages.push({ role: 'error', content: errorMessage, timestamp: Date.now() });
-            }
+            state.currentMessages[modelMessageIndex] = { role: 'error', content: errorMessage, timestamp: Date.now() };
+            uiUtils.renderChatMessages(() => uiUtils.scrollToBottom());
             await dbUtils.saveChat();
-
         } finally {
-            console.log("--- handleSend: finallyブロック実行 ---");
-            const wasAborted = state.abortController?.signal.aborted;
-
             uiUtils.setSendingState(false);
             state.abortController = null;
-            state.partialStreamContent = '';
-            state.partialThoughtStreamContent = '';
-            elements.messageContainer.querySelectorAll('.retrying-hidden').forEach(el => {
-                el.classList.remove('retrying-hidden');
-            });
-
-            // ★ 修正: finallyブロックの最後に、中断された場合のみUIを再描画
-            if(wasAborted) {
-                uiUtils.renderChatMessages();
+            if (state.settings.autoScroll) {
+                requestAnimationFrame(() => {
+                    uiUtils.scrollToBottom();
+                });
             }
-
-            uiUtils.scrollToBottom();
         }
     },
     
@@ -3810,12 +4810,37 @@ const appLogic = {
                 return;
             }
             try {
-                const { messages: importedMessages, systemPrompt: importedSystemPrompt, persistentMemory: importedMemory } = this.parseImportedHistory(textContent);
+                const { messages: importedMessages, systemPrompt: importedSystemPrompt, persistentMemory: importedMemory, imageData: importedImageData } = this.parseImportedHistory(textContent);
+                
                 if (importedMessages.length === 0 && !importedSystemPrompt && (!importedMemory || Object.keys(importedMemory).length === 0)) {
                     await uiUtils.showCustomAlert("ファイルから有効なメッセージ、システムプロンプト、またはメタデータを読み込めませんでした。形式を確認してください。");
                     return;
                 }
 
+                // 画像データをDBに保存し、IDの対応表を作成
+                const imageIdMap = new Map();
+                if (importedImageData && Object.keys(importedImageData).length > 0) {
+                    uiUtils.setLoadingIndicatorText('画像データを復元中...');
+                    elements.loadingIndicator.classList.remove('hidden');
+                    for (const oldId in importedImageData) {
+                        try {
+                            const { mimeType, data } = importedImageData[oldId];
+                            const blob = await this.base64ToBlob(data, mimeType);
+                            const newId = await this.saveImageBlob(blob);
+                            imageIdMap.set(oldId, newId);
+                        } catch (e) {
+                            console.error(`インポート中に画像(旧ID: ${oldId})の復元に失敗:`, e);
+                        }
+                    }
+                    elements.loadingIndicator.classList.add('hidden');
+                }
+
+                // メッセージ内の古い画像IDを新しいIDに置換
+                importedMessages.forEach(msg => {
+                    if (msg.imageIds && msg.imageIds.length > 0) {
+                        msg.imageIds = msg.imageIds.map(oldId => imageIdMap.get(oldId) || oldId).filter(Boolean);
+                    }
+                });
 
                 // --- インポート後の siblingGroupId 割り当て ---
                 let currentGroupId = null;
@@ -3880,6 +4905,8 @@ const appLogic = {
             } catch (error) {
                 console.error("履歴インポート処理エラー:", error);
                 await uiUtils.showCustomAlert(`履歴のインポート中にエラーが発生しました: ${error.message}`);
+            } finally {
+                elements.loadingIndicator.classList.add('hidden');
             }
         };
 
@@ -3895,120 +4922,107 @@ const appLogic = {
     parseImportedHistory(text) {
         const messages = [];
         let systemPrompt = '';
-        let persistentMemory = {}; // persistentMemoryを初期化
-    
-        // メタデータブロックを先に抽出して、元のテキストから削除する
+        let persistentMemory = {};
+        const imageData = {}; // 画像データブロックを格納するオブジェクト
+
+        // メタデータブロック
         const metadataRegex = /<\|#\|metadata\|#\|>([\s\S]*?)<\|#\|\/metadata\|#\|>\s*/;
         const metadataMatch = text.match(metadataRegex);
         let remainingText = text;
-    
         if (metadataMatch) {
-            const metadataJson = metadataMatch[1].trim();
             try {
-                persistentMemory = JSON.parse(metadataJson);
-                console.log("インポートファイルからpersistentMemoryをパースしました:", persistentMemory);
+                persistentMemory = JSON.parse(metadataMatch[1].trim());
             } catch (e) {
-                console.error("インポートされたmetadataのJSONパースに失敗しました。空のオブジェクトとして扱います。", e);
-                persistentMemory = {}; // パース失敗時は空に
+                console.error("インポートされたmetadataのJSONパースに失敗:", e);
+                persistentMemory = {};
             }
-            // メタデータブロックをテキストから削除して、残りのパースに影響しないようにする
-            remainingText = text.replace(metadataRegex, '');
+            remainingText = remainingText.replace(metadataRegex, '');
+        }
+
+        // 画像データブロックを先に抽出・削除
+        const imageDataRegex = /<\|#\|imagedata\|#\|>([\s\S]*?)<\|#\|\/imagedata\|#\|>\s*/;
+        const imageDataMatch = remainingText.match(imageDataRegex);
+        if (imageDataMatch) {
+            try {
+                const imageDataJson = imageDataMatch[1].trim();
+                Object.assign(imageData, JSON.parse(imageDataJson));
+            } catch (e) {
+                console.error("インポートされたimagedataのJSONパースに失敗:", e);
+            }
+            remainingText = remainingText.replace(imageDataRegex, '');
         }
     
-        // 正規表現を修正: <|#|role|#| [attributes]>\ncontent\n<|#|/role|#|>
         const blockRegex = /<\|#\|(system|user|model)\|#\|([^>]*)>([\s\S]*?)<\|#\|\/\1\|#\|>/g;
         let match;
     
-        // メタデータ削除後のテキストに対してループ処理
         while ((match = blockRegex.exec(remainingText)) !== null) {
             const role = match[1];
-            const attributesString = match[2].trim(); // 属性文字列 (例: "isCascaded isSelected")
-            const content = match[3].trim(); // コンテンツ
+            const attributesString = match[2].trim();
+            const content = match[3].trim();
     
             if (role === 'system' && content) {
-                systemPrompt = content; // システムプロンプトを抽出
-            } else if ((role === 'user' || role === 'model') && (content || attributesString.includes('attachments'))) { // コンテンツが空でも attachments があれば処理
+                systemPrompt = content;
+            } else if ((role === 'user' || role === 'model')) {
                 const messageData = {
                     role: role,
                     content: content,
                     timestamp: Date.now(),
-                    attachments: [] // 初期化
+                    attachments: []
                 };
-                // 属性をパース
-                const attributes = {};
-                attributesString.split(/\s+/).forEach(attr => {
-                    const eqIndex = attr.indexOf('=');
-                    if (eqIndex > 0) {
-                        const key = attr.substring(0, eqIndex);
-                        let value = attr.substring(eqIndex + 1);
-                        // クォートを除去
-                        if (value.startsWith('"') && value.endsWith('"')) {
-                            value = value.substring(1, value.length - 1);
+
+                const attributeRegex = /(\w+)="([^"]*)"|(\w+)/g;
+                let attrMatch;
+                while ((attrMatch = attributeRegex.exec(attributesString)) !== null) {
+                    if (attrMatch[1]) { // key="value" 形式
+                        const key = attrMatch[1];
+                        const value = attrMatch[2].replace(/&quot;/g, '"');
+                        if (key === 'attachments') {
+                            messageData.attachments = value.split(';').map(name => ({
+                                name: name, mimeType: 'unknown/unknown', base64Data: ''
+                            }));
+                        } else if (key === 'imageIds') {
+                            messageData.imageIds = value.split(',');
                         }
-                        attributes[key] = value.replace(/&quot;/g, '"'); // デコード
-                    } else if (attr) {
-                        attributes[attr] = true; // isCascaded, isSelected
+                    } else if (attrMatch[3]) { // boolean 形式
+                        messageData[attrMatch[3]] = true;
                     }
-                });
-    
-                if (role === 'model') {
-                    messageData.isCascaded = attributes['isCascaded'] === true;
-                    messageData.isSelected = attributes['isSelected'] === true;
                 }
-                // attachments 属性をパース
-                if (role === 'user' && attributes['attachments']) {
-                    const fileNames = attributes['attachments'].split(';');
-                    messageData.attachments = fileNames.map(name => ({
-                        name: name,
-                        mimeType: 'unknown/unknown', // インポート時は不明
-                        base64Data: '' // Base64データはインポートしない
-                    }));
-                }
-                
                 messages.push(messageData);
             }
         }
         console.log(`インポートテキストから ${messages.length} 件のメッセージとシステムプロンプト(${systemPrompt ? 'あり' : 'なし'})をパースしました。`);
-        // 戻り値に persistentMemory を追加
-        return { messages, systemPrompt, persistentMemory };
+        
+        // 戻り値にimageDataを追加
+        return { messages, systemPrompt, persistentMemory, imageData };
     },
+
     // -------------------------------
 
     // --- 背景画像ハンドラ ---
-     // 背景画像アップロード処理
-     async handleBackgroundImageUpload(file) {
-         console.log("選択されたファイル:", file.name, file.type, file.size);
-         const maxSize = 5 * 1024 * 1024; // 5MB制限 (例)
-         if (file.size > maxSize) {
-             await uiUtils.showCustomAlert(`画像サイズが大きすぎます (${(maxSize / 1024 / 1024).toFixed(1)}MB以下にしてください)`);
-             return;
-         }
-         if (!file.type.startsWith('image/')) {
-             await uiUtils.showCustomAlert("画像ファイルを選択してください (JPEG, PNG, GIF, WebPなど)");
-             return;
-         }
-         try {
-             uiUtils.revokeExistingObjectUrl(); // 既存URLを破棄
-             const blob = file; // ファイルはBlobとして扱える
-             // DBにBlobとして保存
-             await dbUtils.saveSetting('backgroundImageBlob', blob);
-             state.settings.backgroundImageBlob = blob; // stateにも反映
-             // 新しいオブジェクトURLを作成して適用
-             state.backgroundImageUrl = URL.createObjectURL(blob);
-             document.documentElement.style.setProperty('--chat-background-image', `url(${state.backgroundImageUrl})`);
-             uiUtils.updateBackgroundSettingsUI(); // UI更新
-             console.log("背景画像を更新しました。");
-             // アラートは不要 (変更は即時反映、DB保存は「設定を保存」で行う)
-         } catch (error) {
-             console.error("背景画像アップロード処理エラー:", error);
-             await uiUtils.showCustomAlert(`背景画像の処理中にエラーが発生しました: ${error}`);
-             // エラー時はリセット
-             uiUtils.revokeExistingObjectUrl();
-             document.documentElement.style.setProperty('--chat-background-image', 'none');
-             state.settings.backgroundImageBlob = null;
-             uiUtils.updateBackgroundSettingsUI();
-         }
-     },
+    async handleBackgroundImageUpload(file) {
+        const maxSize = 5 * 1024 * 1024;
+        if (file.size > maxSize) {
+            await uiUtils.showCustomAlert(`画像サイズが大きすぎます (${(maxSize / 1024 / 1024).toFixed(1)}MB以下にしてください)`);
+            return;
+        }
+        if (!file.type.startsWith('image/')) {
+            await uiUtils.showCustomAlert("画像ファイルを選択してください (JPEG, PNG, GIF, WebPなど)");
+            return;
+        }
+        try {
+            const blob = file;
+            // stateとDBを更新し、新しい関数を呼び出してUIに適用する
+            state.settings.backgroundImageBlob = blob;
+            await dbUtils.saveSetting('backgroundImageBlob', blob);
+            uiUtils.applyBackgroundImage();
+        } catch (error) {
+            console.error("背景画像の保存・適用エラー:", error);
+            // エラー時にはstateとDBをnullに戻し、背景を非表示にする
+            state.settings.backgroundImageBlob = null;
+            await dbUtils.saveSetting('backgroundImageBlob', null);
+            uiUtils.applyBackgroundImage();
+        }
+    },
      // 背景画像削除の確認
      async confirmDeleteBackgroundImage() {
          const confirmed = await uiUtils.showCustomConfirm("背景画像を削除しますか？");
@@ -4017,135 +5031,24 @@ const appLogic = {
          }
      },
      // 背景画像削除処理
-     async handleBackgroundImageDelete() {
-         try {
-             uiUtils.revokeExistingObjectUrl(); // URL破棄
-             // DBの値をnullで上書き
-             await dbUtils.saveSetting('backgroundImageBlob', null);
-             state.settings.backgroundImageBlob = null; // stateもnullに
-             // スタイルとUIをリセット
-             document.documentElement.style.setProperty('--chat-background-image', 'none');
-             uiUtils.updateBackgroundSettingsUI();
-             console.log("背景画像を削除しました。");
-             // アラート不要
-         } catch (error) {
-             console.error("背景画像削除エラー:", error);
-             await uiUtils.showCustomAlert(`背景画像の削除中にエラーが発生しました: ${error}`);
-         }
-     },
-     // -------------------------------
-
-    // 設定を保存
-    async saveSettings() {
-        const defaultHeaderColor = elements.darkModeToggle.checked ? DARK_THEME_COLOR : LIGHT_THEME_COLOR;
-        const currentHeaderColor = elements.headerColorInput.value;
-        const newSettings = {
-            apiKey: elements.apiKeyInput.value.trim(),
-            modelName: elements.modelNameSelect.value,
-            streamingOutput: elements.streamingOutputCheckbox.checked,
-            streamingSpeed: elements.streamingSpeedInput.value === '' ? DEFAULT_STREAMING_SPEED : parseInt(elements.streamingSpeedInput.value),
-            systemPrompt: elements.systemPromptDefaultTextarea.value.trim(),
-            temperature: elements.temperatureInput.value === '' ? null : parseFloat(elements.temperatureInput.value),
-            maxTokens: elements.maxTokensInput.value === '' ? null : parseInt(elements.maxTokensInput.value),
-            topK: elements.topKInput.value === '' ? null : parseInt(elements.topKInput.value),
-            topP: elements.topPInput.value === '' ? null : parseFloat(elements.topPInput.value),
-            presencePenalty: elements.presencePenaltyInput.value === '' ? null : parseFloat(elements.presencePenaltyInput.value),
-            frequencyPenalty: elements.frequencyPenaltyInput.value === '' ? null : parseFloat(elements.frequencyPenaltyInput.value),
-            thinkingBudget: elements.thinkingBudgetInput.value === '' ? null : parseInt(elements.thinkingBudgetInput.value, 10),
-            includeThoughts: elements.includeThoughtsToggle.checked,
-            enableThoughtTranslation: elements.enableThoughtTranslationCheckbox.checked,
-            thoughtTranslationModel: elements.thoughtTranslationModelSelect.value,
-
-            dummyUser: elements.dummyUserInput.value.trim(),
-            applyDummyToProofread: elements.applyDummyToProofreadCheckbox.checked,
-            applyDummyToTranslate: elements.applyDummyToTranslateCheckbox.checked,
-            dummyModel: elements.dummyModelInput.value.trim(),
-            concatDummyModel: elements.concatDummyModelCheckbox.checked,
-            additionalModels: elements.additionalModelsTextarea.value.trim(),
-            pseudoStreaming: elements.pseudoStreamingCheckbox.checked,
-            enterToSend: elements.enterToSendCheckbox.checked,
-            historySortOrder: elements.historySortOrderSelect.value,
-            darkMode: elements.darkModeToggle.checked,
-            fontFamily: elements.fontFamilyInput.value.trim(),
-            hideSystemPromptInChat: elements.hideSystemPromptToggle.checked,
-            geminiEnableGrounding: elements.geminiEnableGroundingToggle.checked,
-            geminiEnableFunctionCalling: elements.geminiEnableFunctionCallingToggle.checked,
-            enableSwipeNavigation: elements.swipeNavigationToggle.checked,
-            enableAutoRetry: elements.enableAutoRetryCheckbox.checked,
-            maxRetries: parseInt(elements.maxRetriesInput.value, 10) || 0,
-            useFixedRetryDelay: elements.useFixedRetryDelayCheckbox.checked,
-            fixedRetryDelaySeconds: parseInt(elements.fixedRetryDelayInput.value, 10) || 15,
-            maxBackoffDelaySeconds: parseInt(elements.maxBackoffDelayInput.value, 10) || 60,
-            enableProofreading: elements.enableProofreadingCheckbox.checked,
-            proofreadingModelName: elements.proofreadingModelNameSelect.value,
-            proofreadingSystemInstruction: elements.proofreadingSystemInstructionTextarea.value.trim(),
-            googleSearchApiKey: elements.googleSearchApiKeyInput.value.trim(),
-            googleSearchEngineId: elements.googleSearchEngineIdInput.value.trim(),
-            overlayOpacity: parseFloat(elements.overlayOpacitySlider.value) / 100,
-            messageOpacity: (parseFloat(elements.messageOpacitySlider?.value) || 100) / 100,
-            headerColor: elements.headerColorInput.value,
-        };
-
-        if (isNaN(newSettings.streamingSpeed) || newSettings.streamingSpeed < 0) {
-            newSettings.streamingSpeed = DEFAULT_STREAMING_SPEED;
-        }
-        if (newSettings.temperature !== null && (isNaN(newSettings.temperature) || newSettings.temperature < 0 || newSettings.temperature > 2)) {
-            newSettings.temperature = null;
-        }
-        if (newSettings.maxTokens !== null && (isNaN(newSettings.maxTokens) || newSettings.maxTokens < 1)) {
-            newSettings.maxTokens = null;
-        }
-        if (newSettings.topK !== null && (isNaN(newSettings.topK) || newSettings.topK < 1)) {
-            newSettings.topK = null;
-        }
-        if (newSettings.topP !== null && (isNaN(newSettings.topP) || newSettings.topP < 0 || newSettings.topP > 1)) {
-            newSettings.topP = null;
-        }
-        if (newSettings.presencePenalty !== null && (isNaN(newSettings.presencePenalty) || newSettings.presencePenalty < -2.0 || newSettings.presencePenalty >= 2.0)) {
-            newSettings.presencePenalty = null;
-        }
-        if (newSettings.frequencyPenalty !== null && (isNaN(newSettings.frequencyPenalty) || newSettings.frequencyPenalty < -2.0 || newSettings.frequencyPenalty >= 2.0)) {
-            newSettings.frequencyPenalty = null;
-        }
-        if (newSettings.thinkingBudget !== null && (isNaN(newSettings.thinkingBudget) || newSettings.thinkingBudget < 0 || !Number.isInteger(newSettings.thinkingBudget))) {
-            newSettings.thinkingBudget = null;
-        }
-        if (isNaN(newSettings.maxRetries) || newSettings.maxRetries < 0) {
-            newSettings.maxRetries = 0;
-        }
-        if (isNaN(newSettings.fixedRetryDelaySeconds) || newSettings.fixedRetryDelaySeconds < 0) {
-            newSettings.fixedRetryDelaySeconds = 15;
-        }
-        if (isNaN(newSettings.maxBackoffDelaySeconds) || newSettings.maxBackoffDelaySeconds < 0) {
-            newSettings.maxBackoffDelaySeconds = 60;
-        }
-
+    async handleBackgroundImageDelete() {
         try {
-            const oldSortOrder = state.settings.historySortOrder;
-            const { backgroundImageBlob, ...settingsToSave } = newSettings;
+            uiUtils.revokeExistingObjectUrl();
+            await dbUtils.saveSetting('backgroundImageBlob', null);
+            state.settings.backgroundImageBlob = null;
 
-            const promises = Object.entries(settingsToSave).map(([key, value]) =>
-                dbUtils.saveSetting(key, value)
-            );
-            await Promise.all(promises);
-
-            const currentBgBlob = state.settings.backgroundImageBlob;
-            state.settings = { ...state.settings, ...settingsToSave };
-            state.settings.backgroundImageBlob = currentBgBlob;
-            updateCurrentSystemPrompt();
-            uiUtils.applySettingsToUI();
-            uiUtils.renderChatMessages(true);
-
-            console.log("設定保存成功:", { ...state.settings, backgroundImageBlob: state.settings.backgroundImageBlob ? '[Blob]' : null });
-            await uiUtils.showCustomAlert("設定を保存しました。");
-
-            if (newSettings.historySortOrder !== oldSortOrder && state.currentScreen === 'history') {
-                uiUtils.renderHistoryList();
-            }
+            state.isTemporaryBackgroundActive = false;
+            elements.chatScreen.classList.remove('background-visible');
+            document.documentElement.style.removeProperty('--chat-background-image');
+            uiUtils.updateBackgroundSettingsUI();
         } catch (error) {
-            await uiUtils.showCustomAlert(`設定の保存中にエラーが発生しました: ${error}`);
+    
+    
+           console.error("背景画像削除エラー:", error);
+           await uiUtils.showCustomAlert(`背景画像の削除中にエラーが発生しました: ${error}`);
         }
     },
+     // -------------------------------
 
     // アプリを更新 (キャッシュクリア)
     async updateApp() {
@@ -4235,51 +5138,84 @@ const appLogic = {
         }
     },
 
-    async executeToolCalls(toolCalls) {
-        // 最初に一度だけチャットデータを取得
-        const chat = await dbUtils.getChat(state.currentChatId);
-        if (!chat) {
-            console.error("[Function Calling] executeToolCalls: チャットデータの取得に失敗しました。");
-            // 致命的なエラーなので、ツール実行を中断
-            const errorResult = { role: 'tool', name: 'system_error', response: { error: "チャットデータの取得に失敗" }, timestamp: Date.now() };
-            return [errorResult];
-        }
+    async executeToolCalls(toolCalls, historyForFunctions) {
+        const messagesForFunction = (historyForFunctions || []).map(c => c.originalMessage || c);
+        
+        // ダミープロンプトの数を計算
+        const dummyUserCount = state.settings.dummyUser ? 1 : 0;
+        const dummyModelCount = state.settings.dummyModel ? 1 : 0;
+        const dummyPromptCount = dummyUserCount + dummyModelCount;
+
+        const chat = {
+            id: state.currentChatId,
+            messages: messagesForFunction.filter(m => m.role !== 'tool'),
+            systemPrompt: state.currentSystemPrompt,
+            persistentMemory: state.currentPersistentMemory,
+            dummy_prompt_count: dummyPromptCount // 計算したダミーの数を追加
+        };
+
     
         const toolResults = [];
+        let containsTerminalAction = false;
+        let aggregatedSearchResults = [];
+        let internalUiActions = [];
     
-        // 各ツールコールを一つずつ順番に（直列で）実行する
         for (const toolCall of toolCalls) {
             const functionName = toolCall.functionCall.name;
             const functionArgs = toolCall.functionCall.args;
             
             console.log(`[Function Calling] 実行: ${functionName}`, functionArgs);
     
+            let result;
             if (window.functionCallingTools && typeof window.functionCallingTools[functionName] === 'function') {
                 try {
-                    // 各関数に現在のチャットオブジェクトを渡す
-                    const result = await window.functionCallingTools[functionName](functionArgs, chat);
-                    toolResults.push({ role: 'tool', name: functionName, response: result, timestamp: Date.now() });
+                    result = await window.functionCallingTools[functionName](functionArgs, chat);
                 } catch (e) {
                     console.error(`[Function Calling] 関数 '${functionName}' の実行中にエラーが発生しました:`, e);
-                    toolResults.push({ role: 'tool', name: functionName, response: { error: `関数実行中の内部エラー: ${e.message}` }, timestamp: Date.now() });
+                    result = { error: `関数実行中の内部エラー: ${e.message}` };
                 }
             } else {
                 console.error(`[Function Calling] 関数 '${functionName}' が見つかりません。`);
-                toolResults.push({ role: 'tool', name: functionName, response: { error: `関数 '${functionName}' が見つかりません。` }, timestamp: Date.now() });
+                result = { error: `関数 '${functionName}' が見つかりません。` };
             }
+
+            const responseForAI = { ...result };
+
+            if (result.search_results) {
+                aggregatedSearchResults.push(...result.search_results);
+                delete responseForAI.search_results;
+            }
+
+            if (result._internal_ui_action) {
+                console.log(`[Debug] executeToolCalls: _internal_ui_actionを検出`, result._internal_ui_action);
+                internalUiActions.push(result._internal_ui_action);
+
+                if (result._internal_ui_action.type === 'display_layered_image') {
+                    containsTerminalAction = true;
+                }
+                
+                delete responseForAI._internal_ui_action;
+            }
+
+            toolResults.push({ 
+                role: 'tool', 
+                name: functionName, 
+                response: responseForAI, 
+                timestamp: Date.now() 
+            });
         }
     
-        // 全てのツール実行が完了した後、一度だけDBに保存
-        chat.updatedAt = Date.now();
-        await dbUtils.saveChat(chat.title, chat); // saveChatにchatオブジェクトを渡せるように後で修正
+        if (chat.persistentMemory) {
+            state.currentPersistentMemory = chat.persistentMemory;
+        }
+        await dbUtils.saveChat();
     
-        // stateも最新の状態に更新
-        state.currentPersistentMemory = chat.persistentMemory;
-        state.currentScene = chat.persistentMemory?.scene_stack?.slice(-1)[0] || null;
-        state.currentStyleProfiles = chat.persistentMemory?.style_profiles || {};
+        state.currentScene = state.currentPersistentMemory?.scene_stack?.slice(-1)[0] || null;
+        state.currentStyleProfiles = state.currentPersistentMemory?.style_profiles || {};
     
-        return toolResults;
+        return { toolResults, containsTerminalAction, search_results: aggregatedSearchResults, internalUiActions };
     },
+
 
     // --- システムプロンプト編集 ---
     startEditSystemPrompt() {
@@ -4296,6 +5232,7 @@ const appLogic = {
             state.currentSystemPrompt = newPrompt;
             try {
                 await dbUtils.saveChat(); // 現在のチャットを保存 (SP含む)
+                await sleep(100);
                 console.log("システムプロンプト保存完了");
             } catch (error) {
                 await uiUtils.showCustomAlert("システムプロンプトの保存に失敗しました。");
@@ -4404,36 +5341,153 @@ const appLogic = {
             return;
         }
 
-        originalMessage.content = newRawContent;
-        originalMessage.timestamp = Date.now();
-        delete originalMessage.error;
+        // 1. stateを更新
+        const updatedMessage = {
+            ...originalMessage,
+            content: newRawContent,
+            timestamp: Date.now()
+        };
+        delete updatedMessage.error;
+        state.currentMessages[index] = updatedMessage;
 
+        // 2. 既存のメタ情報表示を一旦削除
+        messageElement.querySelectorAll('.function-call-details, .citation-details').forEach(el => el.remove());
+
+        // 3. テキスト部分をDOMに反映
         const contentDiv = messageElement.querySelector('.message-content');
-        if(contentDiv && typeof marked !== 'undefined' && originalMessage.role === 'model') {
-            try {
+        if (contentDiv) {
+            if (updatedMessage.role === 'model' && typeof marked !== 'undefined') {
                 contentDiv.innerHTML = marked.parse(newRawContent || '');
-            } catch (e) {
-                console.error("編集保存時のMarkdownパースエラー:", e);
-                contentDiv.textContent = newRawContent;
-            }
-        } else if (contentDiv) {
-            const pre = contentDiv.querySelector('pre') || document.createElement('pre');
-            pre.textContent = newRawContent;
-            if(!contentDiv.querySelector('pre')) {
-                contentDiv.innerHTML = '';
-                contentDiv.appendChild(pre);
+            } else {
+                const pre = contentDiv.querySelector('pre') || document.createElement('pre');
+                pre.textContent = newRawContent;
+                if (!contentDiv.querySelector('pre')) {
+                    contentDiv.innerHTML = '';
+                    contentDiv.appendChild(pre);
+                }
             }
         }
 
+        // 4. 画像が存在する場合、画像を再注入
+        if (updatedMessage.role === 'model' && updatedMessage.generated_images && updatedMessage.generated_images.length > 0) {
+            // (この部分は前回の修正と同じなので省略)
+            const imagePlaceholderRegex = /<p>\[IMAGE_HERE\]<\/p>|\[IMAGE_HERE\]/g;
+            const processImages = async () => {
+                const imageElements = [];
+                const imageCacheKeyPrefix = `image-${index}`;
+                for (let i = 0; i < updatedMessage.generated_images.length; i++) {
+                    const imageData = updatedMessage.generated_images[i];
+                    const key = `${imageCacheKeyPrefix}-${i}`;
+                    const img = document.createElement('img');
+                    img.alt = '生成された画像';
+                    img.style.maxWidth = '100%';
+                    img.style.borderRadius = 'var(--border-radius-md)';
+                    img.style.marginTop = '8px';
+                    if (state.imageUrlCache.has(key)) {
+                        img.src = state.imageUrlCache.get(key);
+                    } else {
+                        try {
+                            const blob = await base64ToBlob(imageData.data, imageData.mimeType);
+                            const url = URL.createObjectURL(blob);
+                            state.imageUrlCache.set(key, url);
+                            img.src = url;
+                        } catch (e) {
+                            console.error(`[Memory] BlobまたはObjectURLの生成に失敗しました (Key: ${key}):`, e);
+                            img.alt = '画像表示エラー';
+                        }
+                    }
+                    imageElements.push(img.outerHTML);
+                }
+                let imageIndex = 0;
+                const replacedHtml = contentDiv.innerHTML.replace(imagePlaceholderRegex, () => {
+                    return imageIndex < imageElements.length ? imageElements[imageIndex++] : '';
+                });
+                contentDiv.innerHTML = replacedHtml;
+                if (imageIndex < imageElements.length) {
+                    const fragment = document.createDocumentFragment();
+                    for (let i = imageIndex; i < imageElements.length; i++) {
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = imageElements[i];
+                        fragment.appendChild(tempDiv.firstChild);
+                    }
+                    contentDiv.appendChild(fragment);
+                }
+            };
+            await processImages();
+        }
+        
+        // 5. メタ情報（ツール使用履歴など）を再生成して追加
+        if (updatedMessage.role === 'model') {
+            const detailsFragment = document.createDocumentFragment();
+            // ツール使用履歴
+            if (updatedMessage.executedFunctions && updatedMessage.executedFunctions.length > 0) {
+                const details = document.createElement('details');
+                details.classList.add('function-call-details');
+                const uniqueFunctions = [...new Set(updatedMessage.executedFunctions)];
+                const summary = document.createElement('summary');
+                summary.innerHTML = `⚙️ ツール使用 (${uniqueFunctions.length}件)`;
+                details.appendChild(summary);
+                const list = document.createElement('ul');
+                list.classList.add('function-call-list');
+                uniqueFunctions.forEach(funcName => {
+                    const listItem = document.createElement('li');
+                    listItem.textContent = funcName;
+                    list.appendChild(listItem);
+                });
+                details.appendChild(list);
+                detailsFragment.appendChild(details);
+            }
+            // Web検索結果
+            if (updatedMessage.search_web_results && updatedMessage.search_web_results.length > 0) {
+                const details = document.createElement('details');
+                details.classList.add('function-call-details');
+                const summary = document.createElement('summary');
+                summary.innerHTML = `🌐 Web検索結果 (${updatedMessage.search_web_results.length}件)`;
+                details.appendChild(summary);
+                const list = document.createElement('ul');
+                list.classList.add('function-call-list');
+                updatedMessage.search_web_results.forEach(result => {
+                    const listItem = document.createElement('li');
+                    const link = document.createElement('a');
+                    link.href = result.link;
+                    link.textContent = result.title;
+                    link.title = result.snippet;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    listItem.appendChild(link);
+                    list.appendChild(listItem);
+                });
+                details.appendChild(list);
+                detailsFragment.appendChild(details);
+            }
+            
+            // 生成したメタ情報を適切な場所に追加
+            if (contentDiv.innerHTML.trim() !== '') {
+                contentDiv.appendChild(detailsFragment);
+            } else {
+                messageElement.appendChild(detailsFragment);
+            }
+        }
+
+        // 6. Prism.jsでハイライトを再適用
+        if (window.Prism) {
+            contentDiv.querySelectorAll('pre code').forEach((block) => {
+                Prism.highlightElement(block);
+            });
+        }
+
+        // 7. 編集UIを閉じる
         this.finishEditing(messageElement);
 
-        let requiresTitleUpdate = (index === state.currentMessages.findIndex(m => m.role === 'user'));
+        // 8. DBへの保存処理
         try {
+            const requiresTitleUpdate = (index === state.currentMessages.findIndex(m => m.role === 'user'));
             let newTitleForSave = null;
             if (requiresTitleUpdate) {
                 newTitleForSave = newRawContent.substring(0, 50) || "無題のチャット";
             }
             await dbUtils.saveChat(newTitleForSave);
+
             if (requiresTitleUpdate) {
                 uiUtils.updateChatTitle(newTitleForSave);
             }
@@ -4442,6 +5496,8 @@ const appLogic = {
             await uiUtils.showCustomAlert("メッセージ編集後のチャット保存に失敗しました。");
         }
     },
+
+
     // メッセージ編集をキャンセル
     cancelEditMessage(index, messageElement = null) {
           if (!messageElement) {
@@ -4476,6 +5532,8 @@ const appLogic = {
             state.editingMessageIndex = null;
             console.log("編集終了:", index);
         }
+
+        elements.userInput.focus();
     },
 
     // メッセージを削除 (会話ターン全体)
@@ -4488,7 +5546,7 @@ const appLogic = {
             return;
         }
         if (state.isEditingSystemPrompt) {
-            await uiUtils.showCustomAlert("システムプロンプト編集中は削除できません。");
+            await uiUtils.showCustomAlert("システムプロンプトを編集中は削除できません。");
             return;
         }
         if (index < 0 || index >= state.currentMessages.length) {
@@ -4502,7 +5560,18 @@ const appLogic = {
         let deleteTargetDescription = "";
         let indicesToDelete = [];
 
-        if (messageToDelete.role === 'model' && messageToDelete.isCascaded && messageToDelete.siblingGroupId) {
+        if (messageToDelete.role === 'user') {
+            indicesToDelete.push(index);
+            confirmMessage = `メッセージ「${messageContentPreview}」を削除しますか？`;
+            deleteTargetDescription = `単一メッセージ (index: ${index}, role: user)`;
+
+            const nextMessageIndex = index + 1;
+            if (nextMessageIndex < state.currentMessages.length && state.currentMessages[nextMessageIndex].role === 'error') {
+                indicesToDelete.push(nextMessageIndex);
+                confirmMessage = `メッセージ「${messageContentPreview}」と、それに対するエラー応答を削除しますか？`;
+                deleteTargetDescription = `メッセージペア (user at ${index}, error at ${nextMessageIndex})`;
+            }
+        } else if (messageToDelete.role === 'model' && messageToDelete.isCascaded && messageToDelete.siblingGroupId) {
             const groupId = messageToDelete.siblingGroupId;
             const siblings = state.currentMessages.filter(msg => msg.role === 'model' && msg.isCascaded && msg.siblingGroupId === groupId);
             indicesToDelete = state.currentMessages
@@ -4522,106 +5591,174 @@ const appLogic = {
             console.log(`削除実行: ${deleteTargetDescription}`);
             const originalFirstUserMsgIndex = state.currentMessages.findIndex(m => m.role === 'user');
 
+            // 先にDOMから要素を削除
+            indicesToDelete.forEach(idx => {
+                const elementToRemove = elements.messageContainer.querySelector(`.message[data-index="${idx}"]`);
+                if (elementToRemove) {
+                    elementToRemove.remove();
+                }
+            });
+            // その後stateを更新
             indicesToDelete.sort((a, b) => b - a).forEach(idx => {
                 state.currentMessages.splice(idx, 1);
             });
-            console.log(`メッセージ削除完了 (state)。削除件数: ${indicesToDelete.length}`);
+            // 最後にインデックスを振り直す
+            elements.messageContainer.querySelectorAll('.message').forEach((el, i) => {
+                el.dataset.index = i;
+            });
 
-            uiUtils.renderChatMessages();
+            console.log(`メッセージ削除完了 (state)。削除件数: ${indicesToDelete.length}`);
 
             const newFirstUserMsgIndex = state.currentMessages.findIndex(m => m.role === 'user');
             let requiresTitleUpdate = indicesToDelete.includes(originalFirstUserMsgIndex);
 
             try {
+                // 先にUIを完全に更新し、インデックスのズレを解消する
+                uiUtils.renderChatMessages();
+    
                 let newTitleForSave = null;
                 const currentChatData = state.currentChatId ? await dbUtils.getChat(state.currentChatId) : null;
-
+    
                 if (requiresTitleUpdate) {
                     const newFirstUserMessage = newFirstUserMsgIndex !== -1 ? state.currentMessages[newFirstUserMsgIndex] : null;
                     newTitleForSave = newFirstUserMessage ? newFirstUserMessage.content.substring(0, 50) : "無題のチャット";
                 } else if (currentChatData) {
                     newTitleForSave = currentChatData.title;
                 }
-
+    
                 await dbUtils.saveChat(newTitleForSave);
-
+    
                 if (requiresTitleUpdate) {
                     uiUtils.updateChatTitle(newTitleForSave);
                 }
-
+    
                 if (state.currentMessages.length === 0 && !state.currentSystemPrompt && state.currentChatId) {
                     console.log("チャットが空になったためリセットします。");
                     this.startNewChat();
                 }
+                
+                if (state.settings.autoScroll) {
+                    requestAnimationFrame(() => {
+                        uiUtils.scrollToBottom();
+                    });
+                }
+    
             } catch (error) {
                 console.error("メッセージ削除後のチャット保存/取得エラー:", error);
                 await uiUtils.showCustomAlert("メッセージ削除後のチャット保存に失敗しました。");
             }
+    
         } else {
              console.log("削除キャンセル");
         }
     },
 
     
-    // 指定メッセージからリトライ
+    
+    
     async retryFromMessage(index) {
-        if (state.editingMessageIndex !== null) {
-            await uiUtils.showCustomAlert("編集中はリトライできません。");
-            return;
-        }
-        if (state.isSending) {
-            await uiUtils.showCustomAlert("送信中です。");
-            return;
-        }
-        if (state.isEditingSystemPrompt) {
-            await uiUtils.showCustomAlert("システムプロンプト編集中はリトライできません。");
-            return;
-        }
+        if (state.isSending) { await uiUtils.showCustomAlert("送信中です。"); return; }
+        
         const userMessage = state.currentMessages[index];
         if (!userMessage || userMessage.role !== 'user') return;
 
         const messageContentPreview = userMessage.content.substring(0, 30) + "...";
-        const confirmed = await uiUtils.showCustomConfirm(`「${messageContentPreview}」から再生成しますか？\n(この入力に対する既存の応答は保持され、これより未来の会話履歴は削除されます)`);
+        const confirmed = await uiUtils.showCustomConfirm(`「${messageContentPreview}」から再生成しますか？\n(これより未来の会話履歴は削除され、既存の応答は別候補として保持されます)`);
 
         if (confirmed) {
-            console.log(`リトライ開始: index=${index}`);
+            uiUtils.setSendingState(true);
 
-            // 1. 未来の会話履歴（次のユーザー発言以降）を削除
-            let deleteStartIndex = -1;
-            for (let i = index + 1; i < state.currentMessages.length; i++) {
-                if (state.currentMessages[i].role === 'user') {
-                    deleteStartIndex = i;
-                    break;
-                }
-            }
-            if (deleteStartIndex !== -1) {
-                console.log(`未来の会話履歴 (index ${deleteStartIndex} 以降) を削除します。`);
-                state.currentMessages.splice(deleteStartIndex);
-            }
-
-            // 2. 既存の応答（これから兄弟になるもの）を一時的にUIから隠す
-            const elementsToHide = [];
-            const messageContainer = elements.messageContainer;
-            const firstResponseIndex = index + 1;
-
-            if (firstResponseIndex < state.currentMessages.length) {
-                const firstResponse = state.currentMessages[firstResponseIndex];
-                if (firstResponse.role === 'model') {
-                    // グループIDがあってもなくても、リトライ地点の直後のモデル応答から次のユーザー応答の手前までを対象とする
-                    for (let i = firstResponseIndex; i < state.currentMessages.length; i++) {
-                        const msg = state.currentMessages[i];
-                        if (msg.role === 'user') break; // 次のユーザーメッセージで中断
-                        if(msg.role === 'model') {
-                            const el = messageContainer.querySelector(`.message[data-index="${i}"]`);
-                            if (el) elementsToHide.push(el);
-                        }
-                    }
-                }
-            }
-            elementsToHide.forEach(el => el.classList.add('retrying-hidden'));
+            const futureMessages = state.currentMessages.slice(index + 1);
+            let originalResponses = [];
             
-            uiUtils.scrollToBottom(); // UIをスクロール
-            await this.handleSend(true, index); // handleSendにリトライであることを伝える
+            const firstModelResponse = futureMessages.find(msg => msg.role === 'model');
+            if (firstModelResponse && firstModelResponse.isCascaded && firstModelResponse.siblingGroupId) {
+                const groupId = firstModelResponse.siblingGroupId;
+                originalResponses = state.currentMessages.filter(
+                    msg => msg.siblingGroupId === groupId
+                );
+            } else if (firstModelResponse) {
+                originalResponses.push(firstModelResponse);
+            }
+            
+            // 先にDOMから要素を削除
+            const messagesToRemove = state.currentMessages.slice(index + 1);
+            messagesToRemove.forEach((msg, i) => {
+                const elementToRemove = elements.messageContainer.querySelector(`.message[data-index="${index + 1 + i}"]`);
+                if (elementToRemove) {
+                    elementToRemove.remove();
+                }
+            });
+            // その後stateを更新
+            state.currentMessages.splice(index + 1);
+
+            try {
+                const baseHistory = state.currentMessages.filter(msg => !msg.isCascaded || msg.isSelected);
+                const historyForApi = this._prepareApiHistory(baseHistory);
+
+                // プレースホルダーをstateとUIに「追加」
+                const modelMessage = { role: 'model', content: '', timestamp: Date.now() };
+                state.currentMessages.push(modelMessage);
+                const modelMessageIndex = state.currentMessages.length - 1;
+                uiUtils.appendMessage(modelMessage.role, modelMessage.content, modelMessageIndex, true);
+                uiUtils.scrollToBottom();
+
+                const generationConfig = {};
+                if (state.settings.temperature !== null) generationConfig.temperature = state.settings.temperature;
+                if (state.settings.maxTokens !== null) generationConfig.maxOutputTokens = state.settings.maxTokens;
+                if (state.settings.topK !== null) generationConfig.topK = state.settings.topK;
+                if (state.settings.topP !== null) generationConfig.topP = state.settings.topP;
+                 if (state.settings.thinkingBudget !== null || state.settings.includeThoughts) {
+                    generationConfig.thinkingConfig = {};
+                    if(state.settings.thinkingBudget !== null) generationConfig.thinkingConfig.thinkingBudget = state.settings.thinkingBudget;
+
+                    if(state.settings.includeThoughts) generationConfig.thinkingConfig.includeThoughts = true;
+                }
+                const systemInstruction = state.currentSystemPrompt?.trim() ? { role: "system", parts: [{ text: state.currentSystemPrompt.trim() }] } : null;
+
+                const newMessages = await this._internalHandleSend(historyForApi, generationConfig, systemInstruction);
+                const newAggregatedMessage = this._aggregateMessages(newMessages);
+
+                const siblingGroupId = (originalResponses.length > 0 && originalResponses[0].siblingGroupId)
+                    ? originalResponses[0].siblingGroupId
+                    : `gid-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+                originalResponses.forEach(msg => {
+                    msg.isCascaded = true;
+                    msg.isSelected = false;
+                    msg.siblingGroupId = siblingGroupId;
+                });
+
+                newAggregatedMessage.isCascaded = true;
+                newAggregatedMessage.isSelected = true;
+                newAggregatedMessage.siblingGroupId = siblingGroupId;
+
+
+                // プレースホルダーを削除し、元の応答と新しい応答をstateに追加
+                state.currentMessages.splice(modelMessageIndex, 1, ...originalResponses, newAggregatedMessage);
+                // 最終結果を全再描画
+                uiUtils.renderChatMessages(() => uiUtils.scrollToBottom());
+                await dbUtils.saveChat();
+
+            } catch(error) {
+                console.error("--- retryFromMessage: 最終catchブロックでエラー捕捉 ---", error);
+                const errorMessage = (error.name !== 'AbortError') ? (error.message || "不明なエラーが発生しました。") : "リクエストがキャンセルされました。";
+                // プレースホルダーをエラーメッセージに置き換える
+                const errorIndex = state.currentMessages.findIndex(m => m.timestamp === modelMessage.timestamp);
+                if (errorIndex !== -1) {
+                    state.currentMessages[errorIndex] = { role: 'error', content: errorMessage, timestamp: Date.now() };
+                }
+                uiUtils.renderChatMessages(() => uiUtils.scrollToBottom());
+                await dbUtils.saveChat();
+            } finally {
+                uiUtils.setSendingState(false);
+                state.abortController = null; 
+                if (state.settings.autoScroll) {
+                    requestAnimationFrame(() => {
+                        uiUtils.scrollToBottom();
+                    });
+                }
+            }
         }
     },
 
@@ -4647,635 +5784,50 @@ const appLogic = {
         if (!currentMsg || !currentMsg.isCascaded || !currentMsg.siblingGroupId) return;
 
         const groupId = currentMsg.siblingGroupId;
-        const siblingsWithIndices = state.currentMessages
-            .map((msg, i) => ({ msg, originalIndex: i }))
-            .filter(item => item.msg.role === 'model' && item.msg.isCascaded && item.msg.siblingGroupId === groupId);
-
-        const currentSiblingIndexInGroup = siblingsWithIndices.findIndex(item => item.originalIndex === currentIndex);
-        if (currentSiblingIndexInGroup === -1) return;
-
-        let targetSiblingIndexInGroup = -1;
-        if (direction === 'prev' && currentSiblingIndexInGroup > 0) {
-            targetSiblingIndexInGroup = currentSiblingIndexInGroup - 1;
-        } else if (direction === 'next' && currentSiblingIndexInGroup < siblingsWithIndices.length - 1) {
-            targetSiblingIndexInGroup = currentSiblingIndexInGroup + 1;
-        }
-
-        if (targetSiblingIndexInGroup !== -1) {
-            // ★ 修正: 現在の選択を解除し、新しいものを選択する、より確実なロジックに変更
-            const currentSelectedItem = siblingsWithIndices[currentSiblingIndexInGroup].msg;
-            currentSelectedItem.isSelected = false;
-            
-            const newlySelectedMessage = siblingsWithIndices[targetSiblingIndexInGroup].msg;
-            newlySelectedMessage.isSelected = true;
-            const newlySelectedIndex = siblingsWithIndices[targetSiblingIndexInGroup].originalIndex;
-
-            console.log(`カスケードナビゲーション: ${currentSiblingIndexInGroup + 1}/${siblingsWithIndices.length} -> ${targetSiblingIndexInGroup + 1}/${siblingsWithIndices.length}`);
-
-            uiUtils.renderChatMessages();
-
-            requestAnimationFrame(() => {
-                const newlySelectedElement = elements.messageContainer.querySelector(`.message[data-index="${newlySelectedIndex}"]`);
-                if (newlySelectedElement && !newlySelectedElement.classList.contains('editing')) {
-                     const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                     if (currentlyShown && currentlyShown !== newlySelectedElement) {
-                         currentlyShown.classList.remove('show-actions');
-                     }
-                     newlySelectedElement.classList.add('show-actions');
-                }
-            });
-
-            try {
-                await dbUtils.saveChat();
-            } catch (error) {
-                console.error("カスケードナビゲーション後の保存失敗:", error);
-                await uiUtils.showCustomAlert("応答の切り替え状態の保存に失敗しました。");
-            }
-        }
-    },
-
-
-    async confirmDeleteCascadeResponse(indexToDelete) {
-        const msgToDelete = state.currentMessages[indexToDelete];
-        if (!msgToDelete || msgToDelete.role !== 'model' || !msgToDelete.isCascaded || !msgToDelete.siblingGroupId) {
-            console.warn("confirmDeleteCascadeResponse: 対象はカスケード応答ではありません。", indexToDelete);
-            return;
-        }
-        if (state.editingMessageIndex !== null) { await uiUtils.showCustomAlert("編集中は削除できません。"); return; }
-        if (state.isSending) { await uiUtils.showCustomAlert("送信中は削除できません。"); return; }
-        if (state.isEditingSystemPrompt) { await uiUtils.showCustomAlert("システムプロンプト編集中は削除できません。"); return; }
-
-        const siblings = this.getCascadedSiblings(indexToDelete, true);
-        const currentIndexInGroup = siblings.findIndex(m => m === msgToDelete) + 1;
-        const totalSiblings = siblings.length;
-        const contentPreview = msgToDelete.content.substring(0, 30) + "...";
-        const confirmMsg = `この応答 (${currentIndexInGroup}/${totalSiblings})「${contentPreview}」を削除しますか？\n(この応答のみが削除されます)`;
-
-        const confirmed = await uiUtils.showCustomConfirm(confirmMsg);
-        if (confirmed) {
-            const wasSelected = msgToDelete.isSelected;
-            const groupId = msgToDelete.siblingGroupId;
-
-            state.currentMessages.splice(indexToDelete, 1);
-            console.log(`カスケード応答削除 (単一): index=${indexToDelete}, groupId=${groupId}`);
-
-            let newlySelectedIndex = -1;
-            const remainingSiblingsWithIndices = state.currentMessages
-                .map((msg, i) => ({ msg, originalIndex: i }))
-                .filter(item => item.msg.role === 'model' && item.msg.isCascaded && item.msg.siblingGroupId === groupId);
-
-            if (remainingSiblingsWithIndices.length > 0) {
-                // まず全解除（多重選択の掃除）
-                remainingSiblingsWithIndices.forEach(item => { item.msg.isSelected = false; });
-
-                if (wasSelected) {
-                    // 元々選択されていたものを消した → 末尾を選択
-                    const lastSiblingItem = remainingSiblingsWithIndices[remainingSiblingsWithIndices.length - 1];
-                    lastSiblingItem.msg.isSelected = true;
-                    newlySelectedIndex = lastSiblingItem.originalIndex;
-                    console.log(`削除後、新しい選択応答を設定 (末尾): newIndex=${newlySelectedIndex}`);
-                } else {
-                    // 元々別の選択があったかは不定 → 末尾を最低限選択
-                    const lastSiblingItem = remainingSiblingsWithIndices[remainingSiblingsWithIndices.length - 1];
-                    lastSiblingItem.msg.isSelected = true;
-                    newlySelectedIndex = lastSiblingItem.originalIndex;
-                }
-            } else {
-                console.log(`グループ ${groupId} の最後の応答が削除されました。`);
-            }
-
-            uiUtils.renderChatMessages();
-            requestAnimationFrame(() => {
-                if (newlySelectedIndex !== -1) {
-                    const elementToShowActions = elements.messageContainer.querySelector(`.message[data-index="${newlySelectedIndex}"]`);
-                    if (elementToShowActions && !elementToShowActions.classList.contains('editing')) {
-                        const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                        if (currentlyShown && currentlyShown !== elementToShowActions) {
-                            currentlyShown.classList.remove('show-actions');
-                        }
-                        elementToShowActions.classList.add('show-actions');
-                        console.log(`.show-actions を再付与 (単一カスケード削除後): index=${newlySelectedIndex}`);
-                    }
-                }
-            });
-
-            try {
-                await dbUtils.saveChat();
-            } catch (error) {
-                console.error("単一カスケード応答削除後の保存失敗:", error);
-                await uiUtils.showCustomAlert("応答削除後のチャット状態の保存に失敗しました。");
-            }
-        } else {
-            console.log("単一カスケード応答の削除キャンセル");
-        }
-    },
-
-    
-    // --- ファイルアップロード関連ロジック ---
-    async handleFileSelection(fileList) {
-        if (!fileList || fileList.length === 0) return;
-
-        const newFiles = Array.from(fileList);
-        let currentTotalSize = state.selectedFilesForUpload.reduce((sum, item) => sum + item.file.size, 0);
-        let addedCount = 0;
-        let skippedCount = 0;
-        let sizeError = false;
-
-        elements.selectFilesBtn.disabled = true;
-        elements.selectFilesBtn.textContent = '処理中...';
-
-        for (const file of newFiles) {
-            if (file.size > MAX_FILE_SIZE) {
-                await uiUtils.showCustomAlert(`ファイル "${file.name}" はサイズが大きすぎます (${formatFileSize(MAX_FILE_SIZE)}以下)。`);
-                skippedCount++;
-                continue;
-            }
-            if (currentTotalSize + file.size > MAX_TOTAL_ATTACHMENT_SIZE) {
-                sizeError = true;
-                skippedCount++;
-                continue;
-            }
-
-            if (state.selectedFilesForUpload.some(item => item.file.name === file.name)) {
-                console.log(`ファイル "${file.name}" は既に追加されています。スキップします。`);
-                skippedCount++;
-                continue;
-            }
-
-            state.selectedFilesForUpload.push({ file: file });
-            currentTotalSize += file.size;
-            addedCount++;
-        }
-
-        elements.selectFilesBtn.disabled = false;
-        elements.selectFilesBtn.textContent = 'ファイルを選択';
-
-        if (sizeError) {
-            await uiUtils.showCustomAlert(`合計ファイルサイズの上限 (${formatFileSize(MAX_TOTAL_ATTACHMENT_SIZE)}) を超えるため、一部のファイルは追加されませんでした。`);
-        }
-        if (skippedCount > 0) {
-            console.log(`${skippedCount}個のファイルがスキップされました（サイズ超過または重複）。`);
-        }
-
-        uiUtils.updateSelectedFilesUI();
-        console.log(`${addedCount}個のファイルが選択リストに追加されました。`);
-    },
-
-    removeSelectedFile(indexToRemove) {
-        if (indexToRemove >= 0 && indexToRemove < state.selectedFilesForUpload.length) {
-            const removedFile = state.selectedFilesForUpload.splice(indexToRemove, 1)[0];
-            console.log(`ファイル "${removedFile.file.name}" をリストから削除しました。`);
-            uiUtils.updateSelectedFilesUI();
-        }
-    },
-
-    async confirmAttachment() {
-        if (state.selectedFilesForUpload.length === 0) {
-            state.pendingAttachments = [];
-            console.log("添付ファイルリストが空の状態で確定されました。送信待ちリストをクリアします。");
-            elements.fileUploadDialog.close('ok');
-            uiUtils.adjustTextareaHeight();
-            uiUtils.updateAttachmentBadgeVisibility();
-            return;
-        }
-
-        elements.confirmAttachBtn.disabled = true;
-        elements.confirmAttachBtn.textContent = '処理中...';
-
-        const attachmentsToAdd = [];
-        let encodingError = false;
-
-        for (const item of state.selectedFilesForUpload) {
-            try {
-                const base64Data = await fileToBase64(item.file);
-
-                let browserMimeType = item.file.type || '';
-                const fileName = item.file.name;
-                const fileExtension = fileName.slice(((fileName.lastIndexOf(".") - 1) >>> 0) + 2).toLowerCase();
-
-                let guessedMimeType = null;
-                if (fileExtension && extensionToMimeTypeMap[fileExtension]) {
-                    guessedMimeType = extensionToMimeTypeMap[fileExtension];
-                }
-
-                let finalMimeType;
-                if (guessedMimeType) {
-                    finalMimeType = guessedMimeType;
-                    if (finalMimeType !== browserMimeType) {
-                        console.log(`ファイル "${fileName}": 拡張子(.${fileExtension})からMIMEタイプを "${finalMimeType}" に設定 (ブラウザ提供: ${browserMimeType || '空'})`);
-                    }
-                } else if (browserMimeType) {
-                    finalMimeType = browserMimeType;
-                    console.log(`ファイル "${fileName}": ブラウザ提供のMIMEタイプ "${finalMimeType}" を使用します。(拡張子からの推測なし)`);
-                } else {
-                    finalMimeType = 'application/octet-stream';
-                    console.warn(`ファイル "${fileName}": MIMEタイプ不明。拡張子(.${fileExtension})にもマッピングなし。'application/octet-stream' を使用します。`);
-                }
-
-                attachmentsToAdd.push({
-                    file: item.file,
-                    name: fileName,
-                    mimeType: finalMimeType,
-                    base64Data: base64Data
-                });
-            } catch (error) {
-                console.error(`ファイル "${item.file.name}" のBase64エンコード中にエラー:`, error);
-                encodingError = true;
-                await uiUtils.showCustomAlert(`ファイル "${item.file.name}" の処理中にエラーが発生しました。`);
-                break;
-            }
-        }
-
-        elements.confirmAttachBtn.disabled = false;
-        elements.confirmAttachBtn.textContent = '添付して閉じる';
-
-        if (!encodingError) {
-            state.pendingAttachments = attachmentsToAdd;
-            console.log(`${state.pendingAttachments.length}件のファイルを添付準備完了:`, state.pendingAttachments.map(a => `${a.name} (${a.mimeType})`));
-            elements.fileUploadDialog.close('ok');
-            uiUtils.adjustTextareaHeight();
-            uiUtils.updateAttachmentBadgeVisibility();
-        }
-    },
-
-    cancelAttachment() {
-        state.selectedFilesForUpload = [];
-        console.log("ファイル添付をキャンセルしました。");
-        elements.fileUploadDialog.close('cancel');
-        uiUtils.updateAttachmentBadgeVisibility();
-    },
-
-    async callApiWithRetry(apiParams) {
-        const { messagesForApi, generationConfig, systemInstruction, tools, isFunctionCallingSequence } = apiParams;
-        let lastError = null;
-        const maxRetries = state.settings.enableAutoRetry ? state.settings.maxRetries : 0;
-        const useStreaming = state.settings.streamingOutput;
-
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                if (state.abortController?.signal.aborted) {
-                    // ループ開始時点でも中断をチェック
-                    throw new DOMException("リクエストがキャンセルされました。", "AbortError");
-                }
-
-                if (attempt > 0) {
-                    let delay;
-                    if (state.settings.useFixedRetryDelay) {
-                        delay = state.settings.fixedRetryDelaySeconds * 1000;
-                    } else {
-                        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
-                        const maxDelay = state.settings.maxBackoffDelaySeconds * 1000;
-                        delay = Math.min(exponentialDelay, maxDelay);
-                    }
-
-                    uiUtils.setLoadingIndicatorText(`APIエラー 再試行(${attempt}回目)... ${Math.round(delay/1000)}秒待機`);
-                    console.log(`API呼び出し失敗。${delay}ms後にリトライします... (試行 ${attempt + 1}/${maxRetries + 1})`);
-                    await interruptibleSleep(delay, state.abortController.signal);
-                }
-
-                if (attempt === 1) {
-                    uiUtils.setLoadingIndicatorText('再試行中...');
-                } else if (attempt > 1) {
-                    uiUtils.setLoadingIndicatorText(`${attempt}回目の再試行中...`);
-                }
-
-                const response = await apiUtils.callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools);
-
-                if (useStreaming) {
-                    let fullContent = '';
-                    let fullThoughtSummary = '';
-                    let toolCalls = null;
-                    let finalMetadata = {};
-
-                    for await (const chunk of apiUtils.handleStreamingResponse(response)) {
-                        if (chunk.type === 'error') {
-                            throw new Error(chunk.message || 'ストリーム内でエラーが発生しました');
-                        }
-                        if (chunk.type === 'chunk') {
-                            if (chunk.contentText) fullContent += chunk.contentText;
-                            if (chunk.thoughtText) fullThoughtSummary += chunk.thoughtText;
-                            if (chunk.toolCalls) toolCalls = (toolCalls || []).concat(chunk.toolCalls);
-                        } else if (chunk.type === 'metadata') {
-                            finalMetadata = chunk;
-                        }
-                    }
-
-                    if (!fullContent && !toolCalls) {
-                        throw new Error("APIから空の応答が返されました。");
-                    }
-
-                    return { 
-                        content: fullContent, 
-                        thoughtSummary: fullThoughtSummary,
-                        toolCalls,
-                        ...finalMetadata,
-                        retryCount: attempt 
-                    };
-
-                } else {
-                    const responseData = await response.json();
-                    
-                    if (responseData.promptFeedback) {
-                        const blockReason = responseData.promptFeedback.blockReason || 'SAFETY';
-                        throw new Error(`APIが応答をブロックしました (理由: ${blockReason})`);
-                    }
-                    if (!responseData.candidates || responseData.candidates.length === 0) {
-                        throw new Error("API応答に有効な候補が含まれていません。");
-                    }
-                    
-                    const candidate = responseData.candidates[0];
-                    const parts = candidate.content?.parts || [];
-                    let finalContent = '';
-                    let finalThoughtSummary = '';
-                    let finalToolCalls = [];
-
-                    parts.forEach(part => {
-                        if (part.text) {
-                            if (part.thought === true) {
-                                finalThoughtSummary += part.text;
-                            } else {
-                                finalContent += part.text;
-                            }
-                        } else if (part.functionCall) {
-                            finalToolCalls.push({ functionCall: part.functionCall });
-                        }
-                    });
-
-                    if (candidate.thoughts?.parts) {
-                        candidate.thoughts.parts.forEach(part => {
-                            if (part.text) {
-                                finalThoughtSummary += part.text;
-                            }
-                        });
-                    }
-                    
-                    if (!finalContent && finalToolCalls.length === 0) {
-                        throw new Error("APIから空の応答が返されました。");
-                    }
-
-                    return {
-                        content: finalContent,
-                        thoughtSummary: finalThoughtSummary.trim() || null,
-                        toolCalls: finalToolCalls.length > 0 ? finalToolCalls : null,
-                        finishReason: candidate.finishReason,
-                        safetyRatings: candidate.safetyRatings,
-                        usageMetadata: responseData.usageMetadata,
-                        retryCount: attempt
-                    };
-                }
-
-            } catch (error) {
-                lastError = error;
-                // ★ 修正: catchブロックの最優先でAbortErrorをチェックし、ループを抜ける
-                if (error.name === 'AbortError') {
-                    console.error("待機中または通信中に中断されました。リトライを中止します。", error);
-                    throw error; // ループを抜けてhandleSendのcatchにエラーを渡す
-                }
-                if (error.status && error.status >= 400 && error.status < 500) {
-                    console.error(`リトライ不可のエラー (ステータス: ${error.status})。リトライを中止します。`, error);
-                    throw error;
-                }
-                console.warn(`API呼び出し/処理試行 ${attempt + 1} が失敗しました。`, error);
-            }
-        }
-
-        console.error("最大リトライ回数に達しました。最終的なエラーをスローします。");
-        throw lastError;
-    },
-
-    createRipple(event, button) {
-        // 既存のrippleを削除
-        const existingRipple = button.querySelector(".ripple");
-        if(existingRipple) {
-            existingRipple.remove();
-        }
-
-        const circle = document.createElement("span");
-        const diameter = Math.max(button.clientWidth, button.clientHeight);
-        const radius = diameter / 2;
-
-        circle.style.width = circle.style.height = `${diameter}px`;
         
-        const rect = button.getBoundingClientRect();
-        circle.style.left = `${event.clientX - rect.left - radius}px`;
-        circle.style.top = `${event.clientY - rect.top - radius}px`;
-        circle.classList.add("ripple");
-
-        button.appendChild(circle);
-
-        // アニメーション終了後に要素を削除
-        setTimeout(() => {
-            if (circle.parentElement) {
-                circle.remove();
-            }
-        }, 600); // animation-durationと合わせる
-    },
-
-    // --- カスケード応答操作 ---
-    getCascadedSiblings(index, includeSelf = false) {
-        const targetMsg = state.currentMessages[index];
-        if (!targetMsg || !targetMsg.isCascaded || !targetMsg.siblingGroupId) {
-            return [];
-        }
-        const groupId = targetMsg.siblingGroupId;
-        const siblings = state.currentMessages.filter((msg, i) =>
-            msg.role === 'model' &&
-            msg.isCascaded &&
-            msg.siblingGroupId === groupId &&
-            (includeSelf || i !== index)
-        );
-        return siblings;
-    },
-
-    async navigateCascade(currentIndex, direction) {
-        const currentMsg = state.currentMessages[currentIndex];
-        if (!currentMsg || !currentMsg.isCascaded || !currentMsg.siblingGroupId) return;
-
-        const groupId = currentMsg.siblingGroupId;
         const siblingsWithIndices = state.currentMessages
             .map((msg, i) => ({ msg, originalIndex: i }))
-            .filter(item => item.msg.role === 'model' && item.msg.isCascaded && item.msg.siblingGroupId === groupId);
+            .filter(item => item.msg.siblingGroupId === groupId);
 
-        const currentSiblingIndex = siblingsWithIndices.findIndex(item => item.originalIndex === currentIndex);
-        if (currentSiblingIndex === -1) return;
+        if (siblingsWithIndices.length <= 1) return;
 
-        let targetSiblingIndex = -1;
-        if (direction === 'prev' && currentSiblingIndex > 0) {
-            targetSiblingIndex = currentSiblingIndex - 1;
-        } else if (direction === 'next' && currentSiblingIndex < siblingsWithIndices.length - 1) {
-            targetSiblingIndex = currentSiblingIndex + 1;
+        const currentPosition = siblingsWithIndices.findIndex(item => item.originalIndex === currentIndex);
+        if (currentPosition === -1) return;
+
+        let targetPosition = -1;
+        if (direction === 'prev' && currentPosition > 0) {
+            targetPosition = currentPosition - 1;
+        } else if (direction === 'next' && currentPosition < siblingsWithIndices.length - 1) {
+            targetPosition = currentPosition + 1;
         }
 
-        if (targetSiblingIndex !== -1) {
-            currentMsg.isSelected = false;
-            const newlySelectedMessage = siblingsWithIndices[targetSiblingIndex].msg;
-            newlySelectedMessage.isSelected = true;
-            const newlySelectedIndex = siblingsWithIndices[targetSiblingIndex].originalIndex;
+        if (targetPosition !== -1) {
+            siblingsWithIndices.forEach(item => {
+                item.msg.isSelected = false;
+            });
 
-            console.log(`カスケードナビゲーション: ${currentSiblingIndex + 1}/${siblingsWithIndices.length} -> ${targetSiblingIndex + 1}/${siblingsWithIndices.length}`);
+            const targetItem = siblingsWithIndices[targetPosition];
+            targetItem.msg.isSelected = true;
+            const newSelectedIndex = targetItem.originalIndex;
 
+            // UIを再描画し、その後で操作UIを強制的に再表示する
             uiUtils.renderChatMessages();
-
+            
+            // requestAnimationFrameを使用して、DOMの更新が完了した後に実行
             requestAnimationFrame(() => {
-                const newlySelectedElement = elements.messageContainer.querySelector(`.message[data-index="${newlySelectedIndex}"]`);
-                if (newlySelectedElement && !newlySelectedElement.classList.contains('editing')) {
+                const elementToShowActions = elements.messageContainer.querySelector(`.message[data-index="${newSelectedIndex}"]`);
+                if (elementToShowActions && !elementToShowActions.classList.contains('editing')) {
+                    // 他に表示されているメニューがあれば閉じる
                     const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                    if (currentlyShown && currentlyShown !== newlySelectedElement) {
+                    if (currentlyShown && currentlyShown !== elementToShowActions) {
                         currentlyShown.classList.remove('show-actions');
                     }
-                    newlySelectedElement.classList.add('show-actions');
-                    console.log(`.show-actions を再付与: index=${newlySelectedIndex}`);
+                    // ターゲットのメニューを表示
+                    elementToShowActions.classList.add('show-actions');
                 }
             });
 
-            try {
-                await dbUtils.saveChat();
-            } catch (error) {
-                console.error("カスケードナビゲーション後の保存失敗:", error);
-                await uiUtils.showCustomAlert("応答の切り替え状態の保存に失敗しました。");
-            }
-        }
-    },
-
-    async confirmDeleteCascadeResponse(indexToDelete) {
-        const msgToDelete = state.currentMessages[indexToDelete];
-        if (!msgToDelete || msgToDelete.role !== 'model' || !msgToDelete.isCascaded || !msgToDelete.siblingGroupId) {
-            console.warn("confirmDeleteCascadeResponse: 対象はカスケード応答ではありません。", indexToDelete);
-            return;
-        }
-        if (state.editingMessageIndex !== null) { await uiUtils.showCustomAlert("編集中は削除できません。"); return; }
-        if (state.isSending) { await uiUtils.showCustomAlert("送信中は削除できません。"); return; }
-        if (state.isEditingSystemPrompt) { await uiUtils.showCustomAlert("システムプロンプト編集中は削除できません。"); return; }
-
-        const siblings = this.getCascadedSiblings(indexToDelete, true);
-        const currentIndexInGroup = siblings.findIndex(m => m === msgToDelete) + 1;
-        const totalSiblings = siblings.length;
-        const contentPreview = msgToDelete.content.substring(0, 30) + "...";
-        const confirmMsg = `この応答 (${currentIndexInGroup}/${totalSiblings})「${contentPreview}」を削除しますか？\n(この応答のみが削除されます)`;
-
-        const confirmed = await uiUtils.showCustomConfirm(confirmMsg);
-        if (confirmed) {
-            const wasSelected = msgToDelete.isSelected;
-            const groupId = msgToDelete.siblingGroupId;
-
-            state.currentMessages.splice(indexToDelete, 1);
-            console.log(`カスケード応答削除 (単一): index=${indexToDelete}, groupId=${groupId}`);
-
-            let newlySelectedIndex = -1;
-            const remainingSiblingsWithIndices = state.currentMessages
-                .map((msg, i) => ({ msg, originalIndex: i }))
-                .filter(item => item.msg.role === 'model' && item.msg.isCascaded && item.msg.siblingGroupId === groupId);
-
-            if (remainingSiblingsWithIndices.length > 0) {
-                if (wasSelected) {
-                    const lastSiblingItem = remainingSiblingsWithIndices[remainingSiblingsWithIndices.length - 1];
-                    if (!lastSiblingItem.msg.isSelected) {
-                        lastSiblingItem.msg.isSelected = true;
-                        newlySelectedIndex = lastSiblingItem.originalIndex;
-                        console.log(`削除後、新しい選択応答を設定 (単一カスケード): newIndex=${newlySelectedIndex}`);
-                    } else {
-                        newlySelectedIndex = lastSiblingItem.originalIndex;
-                    }
-                } else {
-                    const stillSelectedItem = remainingSiblingsWithIndices.find(item => item.msg.isSelected);
-                    if (stillSelectedItem) {
-                        newlySelectedIndex = stillSelectedItem.originalIndex;
-                    }
-                }
-            } else {
-                console.log(`グループ ${groupId} の最後の応答が削除されました。`);
-            }
-
-            uiUtils.renderChatMessages();
-            requestAnimationFrame(() => {
-                if (newlySelectedIndex !== -1) {
-                    const elementToShowActions = elements.messageContainer.querySelector(`.message[data-index="${newlySelectedIndex}"]`);
-                    if (elementToShowActions && !elementToShowActions.classList.contains('editing')) {
-                        const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                        if (currentlyShown && currentlyShown !== elementToShowActions) {
-                            currentlyShown.classList.remove('show-actions');
-                        }
-                        elementToShowActions.classList.add('show-actions');
-                        console.log(`.show-actions を再付与 (単一カスケード削除後): index=${newlySelectedIndex}`);
-                    }
-                }
-            });
-
-            try {
-                await dbUtils.saveChat();
-            } catch (error) {
-                console.error("単一カスケード応答削除後の保存失敗:", error);
-                await uiUtils.showCustomAlert("応答削除後のチャット状態の保存に失敗しました。");
-            }
-        } else {
-            console.log("単一カスケード応答の削除キャンセル");
-        }
-    },
-    // --- カスケード応答操作 ---
-    getCascadedSiblings(index, includeSelf = false) {
-        const targetMsg = state.currentMessages[index];
-        if (!targetMsg || !targetMsg.isCascaded || !targetMsg.siblingGroupId) {
-            return [];
-        }
-        const groupId = targetMsg.siblingGroupId;
-        const siblings = state.currentMessages.filter((msg, i) =>
-            msg.role === 'model' &&
-            msg.isCascaded &&
-            msg.siblingGroupId === groupId &&
-            (includeSelf || i !== index)
-        );
-        return siblings;
-    },
-
-    async navigateCascade(currentIndex, direction) {
-        const currentMsg = state.currentMessages[currentIndex];
-        if (!currentMsg || !currentMsg.isCascaded || !currentMsg.siblingGroupId) return;
-
-        const groupId = currentMsg.siblingGroupId;
-        const siblingsWithIndices = state.currentMessages
-            .map((msg, i) => ({ msg, originalIndex: i }))
-            .filter(item => item.msg.role === 'model' && item.msg.isCascaded && item.msg.siblingGroupId === groupId);
-
-        const currentSiblingIndexInGroup = siblingsWithIndices.findIndex(item => item.originalIndex === currentIndex);
-        if (currentSiblingIndexInGroup === -1) return;
-
-        let targetSiblingIndexInGroup = -1;
-        if (direction === 'prev' && currentSiblingIndexInGroup > 0) {
-            targetSiblingIndexInGroup = currentSiblingIndexInGroup - 1;
-        } else if (direction === 'next' && currentSiblingIndexInGroup < siblingsWithIndices.length - 1) {
-            targetSiblingIndexInGroup = currentSiblingIndexInGroup + 1;
-        }
-
-        if (targetSiblingIndexInGroup !== -1) {
-            // グループ内のすべてのメッセージを選択解除
-            siblingsWithIndices.forEach(item => { item.msg.isSelected = false; });
-            
-            // ターゲットのみを選択
-            const newlySelectedMessage = siblingsWithIndices[targetSiblingIndexInGroup].msg;
-            newlySelectedMessage.isSelected = true;
-            const newlySelectedIndex = siblingsWithIndices[targetSiblingIndexInGroup].originalIndex;
-
-            console.log(`カスケードナビゲーション: ${currentSiblingIndexInGroup + 1}/${siblingsWithIndices.length} -> ${targetSiblingIndexInGroup + 1}/${siblingsWithIndices.length}`);
-
-            uiUtils.renderChatMessages();
-
-            requestAnimationFrame(() => {
-                const newlySelectedElement = elements.messageContainer.querySelector(`.message[data-index="${newlySelectedIndex}"]`);
-                if (newlySelectedElement && !newlySelectedElement.classList.contains('editing')) {
-                        const currentlyShown = elements.messageContainer.querySelector('.message.show-actions');
-                        if (currentlyShown && currentlyShown !== newlySelectedElement) {
-                            currentlyShown.classList.remove('show-actions');
-                        }
-                        newlySelectedElement.classList.add('show-actions');
-                }
-            });
-
-            try {
-                await dbUtils.saveChat();
-            } catch (error) {
-                console.error("カスケードナビゲーション後の保存失敗:", error);
-                await uiUtils.showCustomAlert("応答の切り替え状態の保存に失敗しました。");
-            }
+            await dbUtils.saveChat();
         }
     },
 
@@ -5345,10 +5897,533 @@ const appLogic = {
                 await uiUtils.showCustomAlert("応答削除後のチャット状態の保存に失敗しました。");
             }
         }
-    }
+    },
+    
+    // --- ファイルアップロード関連ロジック ---
+    async handleFileSelection(fileList) {
+        if (!fileList || fileList.length === 0) return;
+
+        // 新しいファイル選択が開始されるたびに、必ずリストをクリアする
+        state.selectedFilesForUpload = [];
+
+        console.log("--- [DEBUG ①] ファイルが選択されました ---");
+        Array.from(fileList).forEach(file => {
+            console.log(`ファイル名: ${file.name}, サイズ: ${file.size}, 種類: ${file.type}`);
+        });
+
+        const newFiles = Array.from(fileList);
+        let currentTotalSize = 0; // クリアしたので0からスタート
+        let addedCount = 0;
+        let skippedCount = 0;
+        let sizeError = false;
+
+        elements.selectFilesBtn.disabled = true;
+        elements.selectFilesBtn.textContent = '処理中...';
+
+        for (const file of newFiles) {
+            if (file.size > MAX_FILE_SIZE) {
+                await uiUtils.showCustomAlert(`ファイル "${file.name}" はサイズが大きすぎます (${formatFileSize(MAX_FILE_SIZE)}以下)。`);
+                skippedCount++;
+                continue;
+            }
+            if (currentTotalSize + file.size > MAX_TOTAL_ATTACHMENT_SIZE) {
+                sizeError = true;
+                skippedCount++;
+                continue;
+            }
+
+            // 配列はクリアされているので、重複チェックは不要
+            state.selectedFilesForUpload.push({ file: file });
+            currentTotalSize += file.size;
+            addedCount++;
+        }
+
+        elements.selectFilesBtn.disabled = false;
+        elements.selectFilesBtn.textContent = 'ファイルを選択';
+
+        if (sizeError) {
+            await uiUtils.showCustomAlert(`合計ファイルサイズの上限 (${formatFileSize(MAX_TOTAL_ATTACHMENT_SIZE)}) を超えるため、一部のファイルは追加されませんでした。`);
+        }
+        if (skippedCount > 0) {
+            console.log(`${skippedCount}個のファイルがスキップされました（サイズ超過）。`);
+        }
+
+        uiUtils.updateSelectedFilesUI();
+        console.log(`${addedCount}個のファイルが選択リストに追加されました。`);
+    },
+    
+
+    removeSelectedFile(indexToRemove) {
+        if (indexToRemove >= 0 && indexToRemove < state.selectedFilesForUpload.length) {
+            const removedFile = state.selectedFilesForUpload.splice(indexToRemove, 1)[0];
+            console.log(`ファイル "${removedFile.file.name}" をリストから削除しました。`);
+            uiUtils.updateSelectedFilesUI();
+        }
+    },
+
+    async confirmAttachment() {
+        if (state.selectedFilesForUpload.length === 0) {
+            state.pendingAttachments = [];
+            console.log("添付ファイルリストが空の状態で確定されました。送信待ちリストをクリアします。");
+            elements.fileUploadDialog.close('ok');
+            uiUtils.adjustTextareaHeight();
+            uiUtils.updateAttachmentBadgeVisibility();
+            return;
+        }
+
+        console.log("--- [DEBUG ②] 添付が確定されました ---");
+        state.selectedFilesForUpload.forEach(item => {
+            console.log(`[DEBUG ②-A] 確定されたファイル: ${item.file.name}, サイズ: ${item.file.size}, 種類: ${item.file.type}`);
+        });
+
+        elements.confirmAttachBtn.disabled = true;
+        elements.confirmAttachBtn.textContent = '処理中...';
+
+        const attachmentsToAdd = [];
+        let encodingError = false;
+
+        for (const item of state.selectedFilesForUpload) {
+            try {
+                // 確実なキャッシュ回避のため、一度Base64に変換し、そこから新しいBlobを再生成する
+                const base64Data = await this.fileToBase64(item.file);
+                const rehydratedBlob = await this.base64ToBlob(base64Data, item.file.type);
+                
+                console.log(`[DEBUG ②-B] ファイル「${item.file.name}」をBase64経由で再生成しました。`, {
+                    originalSize: item.file.size,
+                    newBlobSize: rehydratedBlob.size,
+                    originalType: item.file.type,
+                    newBlobType: rehydratedBlob.type
+                });
+
+                let browserMimeType = item.file.type || '';
+                const fileName = item.file.name;
+                const fileExtension = fileName.slice(((fileName.lastIndexOf(".") - 1) >>> 0) + 2).toLowerCase();
+
+                let guessedMimeType = null;
+                if (fileExtension && extensionToMimeTypeMap[fileExtension]) {
+                    guessedMimeType = extensionToMimeTypeMap[fileExtension];
+                }
+
+                let finalMimeType;
+                if (guessedMimeType) {
+                    finalMimeType = guessedMimeType;
+                    if (finalMimeType !== browserMimeType) {
+                        console.log(`ファイル "${fileName}": 拡張子(.${fileExtension})からMIMEタイプを "${finalMimeType}" に設定 (ブラウザ提供: ${browserMimeType || '空'})`);
+                    }
+                } else if (browserMimeType) {
+                    finalMimeType = browserMimeType;
+                    console.log(`ファイル "${fileName}": ブラウザ提供のMIMEタイプ "${finalMimeType}" を使用します。(拡張子からの推測なし)`);
+                } else {
+                    finalMimeType = 'application/octet-stream';
+                    console.warn(`ファイル "${fileName}": MIMEタイプ不明。拡張子(.${fileExtension})にもマッピングなし。'application/octet-stream' を使用します。`);
+                }
+
+                attachmentsToAdd.push({
+                    file: rehydratedBlob,
+                    name: fileName,
+                    mimeType: finalMimeType,
+                    base64Data: base64Data
+                });
+            } catch (error) {
+                console.error(`ファイル "${item.file.name}" のBase64エンコード中にエラー:`, error);
+                encodingError = true;
+                await uiUtils.showCustomAlert(`ファイル "${item.file.name}" の処理中にエラーが発生しました。`);
+                break;
+            }
+        }
+
+        elements.confirmAttachBtn.disabled = false;
+        elements.confirmAttachBtn.textContent = '添付して閉じる';
+
+        if (!encodingError) {
+            state.pendingAttachments = attachmentsToAdd;
+            console.log(`${state.pendingAttachments.length}件のファイルを添付準備完了:`, state.pendingAttachments.map(a => `${a.name} (${a.mimeType})`));
+            elements.fileUploadDialog.close('ok');
+            uiUtils.adjustTextareaHeight();
+            uiUtils.updateAttachmentBadgeVisibility();
+        }
+    },
+
+
+
+
+    cancelAttachment() {
+        state.selectedFilesForUpload = [];
+        console.log("ファイル添付をキャンセルしました。");
+        elements.fileUploadDialog.close('cancel');
+        uiUtils.updateAttachmentBadgeVisibility();
+    },
+
+    async callApiWithRetry(apiParams) {
+        const { messagesForApi, generationConfig, systemInstruction, tools, isFirstCall } = apiParams;
+        let lastError = null;
+        const maxRetries = state.settings.enableAutoRetry ? state.settings.maxRetries : 0;
+        const forceCalling = state.settings.forceFunctionCalling && isFirstCall;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                if (state.abortController?.signal.aborted) {
+                    throw new DOMException("リクエストがキャンセルされました。", "AbortError");
+                }
+
+                if (attempt > 0) {
+                    let delay;
+                    if (state.settings.useFixedRetryDelay) {
+                        delay = state.settings.fixedRetryDelaySeconds * 1000;
+                    } else {
+                        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+                        const maxDelay = state.settings.maxBackoffDelaySeconds * 1000;
+                        delay = Math.min(exponentialDelay, maxDelay);
+                    }
+
+                    uiUtils.setLoadingIndicatorText(`APIエラー 再試行(${attempt}回目)... ${Math.round(delay/1000)}秒待機`);
+                    console.log(`API呼び出し失敗。${delay}ms後にリトライします... (試行 ${attempt + 1}/${maxRetries + 1})`);
+                    await interruptibleSleep(delay, state.abortController.signal);
+                }
+
+                if (attempt === 1) {
+                    uiUtils.setLoadingIndicatorText('再試行中...');
+                } else if (attempt > 1) {
+                    uiUtils.setLoadingIndicatorText(`${attempt}回目の再試行中...`);
+                }
+
+                const response = await apiUtils.callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling);
+
+                const getFinishReasonError = (candidate) => {
+                    const reason = candidate?.finishReason;
+                    if (reason && reason !== 'STOP' && reason !== 'MAX_TOKENS') {
+                        return new Error(`モデルが応答をブロックしました (理由: ${reason})`);
+                    }
+                    return null;
+                };
+
+                const checkForSafetyRejection = (candidate, content, toolCalls, images) => {
+                    if (content || (toolCalls && toolCalls.length > 0) || (images && images.length > 0)) {
+                        return null;
+                    }
+                    const isNormalFinish = candidate?.finishReason === 'STOP' || candidate?.finishReason === 'MAX_TOKENS';
+                    const safetyRatings = candidate?.safetyRatings;
+                    const hasHighRiskRating = safetyRatings && safetyRatings.some(r => r.probability === 'HIGH' || r.probability === 'MEDIUM');
+
+                    if (isNormalFinish && hasHighRiskRating) {
+                        const highRiskCategories = safetyRatings
+                            .filter(r => r.probability === 'HIGH' || r.probability === 'MEDIUM')
+                            .map(r => r.category.replace('HARM_CATEGORY_', ''))
+                            .join(', ');
+                        return new Error(`モデルがコンテンツの生成を拒否しました (理由: ${highRiskCategories})。プロンプトを調整して再試行してください。`);
+                    }
+                    return null;
+                };
+
+                // 非ストリーミングの処理に統一
+                const responseData = await response.json();
+                
+                if (responseData.promptFeedback) {
+                    const blockReason = responseData.promptFeedback.blockReason || 'SAFETY';
+                    throw new Error(`APIが応答をブロックしました (理由: ${blockReason})`);
+                }
+                if (!responseData.candidates || responseData.candidates.length === 0) {
+                    throw new Error("API応答に有効な候補(candidates)が含まれていません。プロンプトがブロックされた可能性があります。");
+                }
+                
+                const candidate = responseData.candidates[0];
+                const finishReasonError = getFinishReasonError(candidate);
+                if (finishReasonError) throw finishReasonError;
+
+                const parts = candidate.content?.parts || [];
+                let finalContent = '';
+                let finalThoughtSummary = '';
+                let finalToolCalls = [];
+
+                parts.forEach(part => {
+                    if (part.text) {
+                        if (part.thought === true) {
+                            finalThoughtSummary += part.text;
+                        } else {
+                            finalContent += part.text;
+                        }
+                    } else if (part.functionCall) {
+                        finalToolCalls.push({ functionCall: part.functionCall });
+                    }
+                });
+
+                if (candidate.thoughts?.parts) {
+                    candidate.thoughts.parts.forEach(part => {
+                        if (part.text) {
+                            finalThoughtSummary += part.text;
+                        }
+                    });
+                }
+                
+                const safetyError = checkForSafetyRejection(candidate, finalContent, finalToolCalls, []);
+                if (safetyError) throw safetyError;
+
+                if (!finalContent && finalToolCalls.length === 0) {
+                    throw new Error("APIから空の応答が返されました。");
+                }
+
+                return {
+                    content: finalContent,
+                    thoughtSummary: finalThoughtSummary.trim() || null,
+                    toolCalls: finalToolCalls.length > 0 ? finalToolCalls : null,
+                    finishReason: candidate.finishReason,
+                    safetyRatings: candidate.safetyRatings,
+                    usageMetadata: responseData.usageMetadata,
+                    retryCount: attempt
+                };
+
+            } catch (error) {
+                lastError = error;
+                if (error.name === 'AbortError') {
+                    console.error("待機中または通信中に中断されました。リトライを中止します。", error);
+                    throw error;
+                }
+                if (error.status && error.status >= 400 && error.status < 500) {
+                    console.error(`リトライ不可のエラー (ステータス: ${error.status})。リトライを中止します。`, error);
+                    throw error;
+                }
+                console.warn(`API呼び出し/処理試行 ${attempt + 1} が失敗しました。`, error);
+            }
+        }
+
+        console.error("最大リトライ回数に達しました。最終的なエラーをスローします。");
+        throw lastError;
+    },
+
+    createRipple(event, button) {
+        // 既存のrippleを削除
+        const existingRipple = button.querySelector(".ripple");
+        if(existingRipple) {
+            existingRipple.remove();
+        }
+
+        const circle = document.createElement("span");
+        const diameter = Math.max(button.clientWidth, button.clientHeight);
+        const radius = diameter / 2;
+
+        circle.style.width = circle.style.height = `${diameter}px`;
+        
+        const rect = button.getBoundingClientRect();
+        circle.style.left = `${event.clientX - rect.left - radius}px`;
+        circle.style.top = `${event.clientY - rect.top - radius}px`;
+        circle.classList.add("ripple");
+
+        button.appendChild(circle);
+
+        // アニメーション終了後に要素を削除
+        setTimeout(() => {
+            if (circle.parentElement) {
+                circle.remove();
+            }
+        }, 600); // animation-durationと合わせる
+    },
+
+    // --- Function Calling用ヘルパー ---
+    async updateOpacitySettings(opacitySettings) {
+        let settingsChanged = false;
+        const changedItems = [];
+
+        if (typeof opacitySettings.overlay === 'number' && opacitySettings.overlay >= 0 && opacitySettings.overlay <= 1) {
+            state.settings.overlayOpacity = opacitySettings.overlay;
+            await dbUtils.saveSetting('overlayOpacity', state.settings.overlayOpacity);
+            document.documentElement.style.setProperty('--overlay-opacity-value', state.settings.overlayOpacity);
+            changedItems.push(`オーバーレイの濃さを${Math.round(opacitySettings.overlay * 100)}%に`);
+            settingsChanged = true;
+        }
+        if (typeof opacitySettings.message_bubble === 'number' && opacitySettings.message_bubble >= 0.1 && opacitySettings.message_bubble <= 1) {
+            state.settings.messageOpacity = opacitySettings.message_bubble;
+            await dbUtils.saveSetting('messageOpacity', state.settings.messageOpacity);
+            changedItems.push(`メッセージバブルの濃さを${Math.round(opacitySettings.message_bubble * 100)}%に`);
+            settingsChanged = true;
+        }
+
+        if (settingsChanged) {
+            uiUtils.applySettingsToUI();
+            const message = `${changedItems.join('、')}変更しました。`;
+            return { success: true, message: message };
+        } else {
+            return { success: false, message: "有効な値が指定されなかったため、UIは変更されませんでした。" };
+        }
+    },
+
+    /**
+     * Function Callingから受け取ったURLを一時的な背景画像として適用する
+     * @param {string} url - 画像のURL
+     * @returns {Promise<object>} 処理結果
+     */
+     async applyBackgroundImageFromUrl(url) {
+        if (!url || typeof url !== 'string') {
+            return { error: "画像URLが無効です。" };
+        }
+        console.log(`一時的な背景画像をURLから適用: ${url}`);
+        
+        // 既存のオブジェクトURLがあれば解放する
+        uiUtils.revokeExistingObjectUrl();
+        
+        // 新しいURLをstateに保存
+        state.backgroundImageUrl = url;
+        
+        const chatScreen = elements.chatScreen;
+        const isAlreadyVisible = chatScreen.classList.contains('background-visible');
+    
+        // フェードアウト完了後に画像を設定してフェードインさせる処理
+        const switchImageAndFadeIn = () => {
+            document.documentElement.style.setProperty('--chat-background-image', `url("${url}")`);
+            chatScreen.classList.add('background-visible');
+        };
+    
+        if (isAlreadyVisible) {
+            // 画像が表示されている場合：一度フェードアウトさせてから切り替える
+            chatScreen.addEventListener('transitionend', switchImageAndFadeIn, { once: true });
+            chatScreen.classList.remove('background-visible');
+        } else {
+            // 画像がない場合：即座に切り替えてフェードイン
+            switchImageAndFadeIn();
+        }
+        
+        // 一時的な背景が適用されたことを示すフラグを立てる
+    
+
+        state.isTemporaryBackgroundActive = true;
+        
+        // サムネイルUIを更新（新しいURLでサムネイルが表示される）
+        uiUtils.updateBackgroundSettingsUI();
+        
+        const message = `背景画像を一時的に変更しました。この変更はリロードするか、設定から背景を再設定すると元に戻ります。`;
+        return { success: true, message: message };
+    },
+
+
+    async handleBackgroundImageUrl(url) {
+        if (!url || typeof url !== 'string') {
+            return { error: "画像URLが無効です。" };
+        }
+
+        console.log(`背景画像をURLから取得開始: ${url}`);
+        uiUtils.setLoadingIndicatorText('背景画像を取得中...');
+        elements.loadingIndicator.classList.remove('hidden');
+
+        try {
+            // CORSの問題を回避するため、no-corsモードは使わない。
+            // サーバーが許可しない場合はエラーとして扱うのが適切。
+            const response = await fetch(url, { referrerPolicy: "no-referrer" });
+            if (!response.ok) {
+                throw new Error(`画像の取得に失敗しました (HTTPステータス: ${response.status})`);
+            }
+            const blob = await response.blob();
+            
+            const maxSize = 5 * 1024 * 1024; // 5MB
+            if (blob.size > maxSize) {
+                return { error: `画像サイズが大きすぎます (${(maxSize / 1024 / 1024).toFixed(1)}MB以下にしてください)` };
+            }
+
+            uiUtils.revokeExistingObjectUrl();
+            await dbUtils.saveSetting('backgroundImageBlob', blob);
+            state.settings.backgroundImageBlob = blob;
+            state.backgroundImageUrl = URL.createObjectURL(blob);
+            document.documentElement.style.setProperty('--chat-background-image', `url(${state.backgroundImageUrl})`);
+            uiUtils.updateBackgroundSettingsUI();
+            
+            console.log("背景画像をURLから正常に更新しました。");
+            return { success: true, message: "背景画像を更新しました。" };
+
+        } catch (error) {
+            console.error("背景画像のURLからの取得エラー:", error);
+            // CORSエラーはコンソールに表示されることが多いが、プログラムからは詳細を取得できない場合がある
+            if (error instanceof TypeError) { // ネットワークエラーはCORSの可能性が高い
+                 return { error: `画像の取得に失敗しました。指定されたURLのサーバーが外部からのアクセスを許可していない(CORSポリシー)可能性があります。` };
+            }
+            return { error: `画像の取得中にエラーが発生しました: ${error.message}` };
+        } finally {
+            elements.loadingIndicator.classList.add('hidden');
+        }
+    },
+    async exportProfile() {
+        console.log('[Debug Event] exportProfile が呼び出されました。');
+
+        if (!state.activeProfile) {
+            return uiUtils.showCustomAlert("エクスポートするプロファイルが選択されていません。");
+        }
+        
+        // stateのデータを汚染しないようにディープコピーする
+        const profileToExport = JSON.parse(JSON.stringify(state.activeProfile));
+        
+        // アイコンBlobがあればBase64に変換して埋め込む
+        if (state.activeProfile.icon instanceof Blob) {
+            try {
+                const base64Icon = await this.fileToBase64(state.activeProfile.icon);
+                profileToExport.icon = {
+                    mimeType: state.activeProfile.icon.type,
+                    data: base64Icon
+                };
+            } catch (error) {
+                console.error("アイコンのBase64変換に失敗:", error);
+                return uiUtils.showCustomAlert("アイコンのエクスポート処理に失敗しました。");
+            }
+        }
+
+        delete profileToExport.id; // DBのIDは不要なので削除
+
+        const jsonString = JSON.stringify(profileToExport, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const safeName = profileToExport.name.replace(/[\\/:*?"<>|]/g, '_');
+        a.href = url;
+        a.download = `${safeName}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    async importProfile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                if (state.profiles.length >= MAX_PROFILES) {
+                    return uiUtils.showCustomAlert(`プロファイルの上限数（${MAX_PROFILES}個）に達しているため、プロファイルをインポートできません。`);
+                }
+                const importedData = JSON.parse(event.target.result);
+
+                if (!importedData.name || !importedData.settings) {
+                    throw new Error("無効なファイルです。'name'と'settings'プロパティが必要です。");
+                }
+
+                let newProfile = { ...importedData };
+                
+                if (newProfile.icon && newProfile.icon.data) {
+                    try {
+                        newProfile.icon = await this.base64ToBlob(newProfile.icon.data, newProfile.icon.mimeType);
+                    } catch (error) {
+                        console.error("インポート時のアイコン復元に失敗:", error);
+                        newProfile.icon = null;
+                    }
+                }
+
+                let finalName = newProfile.name;
+                const existingNames = state.profiles.map(p => p.name);
+                while (existingNames.includes(finalName)) {
+                    finalName = `${IMPORT_PREFIX}${finalName}`;
+                }
+                newProfile.name = finalName;
+
+                const newId = await dbUtils.addProfile(newProfile);
+                const newlyAddedProfile = await dbUtils.getProfile(newId);
+                state.profiles.push(newlyAddedProfile);
+                
+                uiUtils.updateProfileSwitcherUI();
+                await uiUtils.showCustomAlert(`プロファイル「${finalName}」をインポートしました。`);
+
+            } catch (error) {
+                console.error("プロファイルのインポートに失敗:", error);
+                await uiUtils.showCustomAlert(`プロファイルのインポートに失敗しました: ${error.message}`);
+            }
+        };
+        reader.readAsText(file);
+    },
 }; // appLogic終了
 
-
-
-// --- 初期化処理 ---
-appLogic.initializeApp();
+window.appLogic = appLogic;
+window.state = state;
