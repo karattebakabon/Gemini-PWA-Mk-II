@@ -240,23 +240,28 @@ body:not(.dark-mode) .app-container {
     top: 0;
     z-index: 10;
     transition: background-color var(--transition-duration) var(--transition-timing);
-    gap: var(--spacing-unit);
+    gap: 8px; /* 要素間のスペースを再設定 */
     box-shadow: var(--shadow-2);
 }
+
 .app-header h1 {
-    font-size: 1.25rem;
-    font-weight: 700;
+    font-size: 1.1rem;
+    font-weight: 500;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
     margin: 0;
     margin-right: auto;
+    /* ボタンの高さに合わせるための行の高さを指定 */
+    line-height: 40px; /* header-buttonのpadding(8*2) + icon-size(24) = 40px */
 }
+
+
+
 .header-button {
     background: none;
     border: none;
     color: var(--text-light);
-    font-size: 24px;
     padding: var(--spacing-unit);
     line-height: 1;
     min-width: auto;
@@ -264,6 +269,7 @@ body:not(.dark-mode) .app-container {
     border-radius: 50%;
     box-shadow: none;
 }
+
 .header-button:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
@@ -294,6 +300,8 @@ body:not(.dark-mode) .app-container {
 body.dark-mode .new-chat-button {
     color: var(--text-light);
 }
+
+
 
 /* --- Screen Transitions --- */
 .screen {
@@ -362,12 +370,14 @@ body.dark-mode #chat-overlay {
 .main-content {
     flex-grow: 1;
     overflow-y: auto;
+    overflow-x: hidden; /* 横方向のスクロールを常に禁止する */
     padding: calc(var(--spacing-unit) * 2);
     position: relative;
     z-index: 1;
     touch-action: pan-y;
     padding-bottom: 40px;
 }
+
 
 #chat-screen .main-content {
     background-color: transparent;
@@ -435,70 +445,9 @@ body.dark-mode #chat-overlay {
     color: var(--text-error);
 }
 
-/* --- Message Actions --- */
-.message-actions, .message-cascade-controls {
-    position: absolute;
-    display: none;
-    flex-wrap: nowrap;
-    gap: var(--spacing-unit);
-    background: var(--bg-message-actions);
-    padding: var(--spacing-unit);
-    border-radius: var(--border-radius-md);
-    box-shadow: var(--shadow-2);
-    z-index: 2;
-    transition: opacity var(--transition-duration) var(--transition-timing);
-    width: max-content;
-    white-space: nowrap;
-}
-.message-actions { bottom: calc(-1 * var(--spacing-unit) * 5.5); }
-.message-cascade-controls {
-    top: calc(-1 * var(--spacing-unit) * 5.5);
-    left: 0;
-    align-items: center;
-}
-.message.show-actions .message-actions { display: flex; }
-.message.model.show-actions .message-cascade-controls { display: flex; }
-
-.message.user .message-actions { right: 0; }
-.message.model .message-actions { left: 0; }
-
-.message-actions button, .message-cascade-controls button {
-    padding: calc(var(--spacing-unit) * 0.5) var(--spacing-unit);
-    font-size: 0.75rem;
-    min-width: auto;
-    gap: 4px;
-    box-shadow: none;
-    white-space: nowrap;
-    flex: 0 0 auto;
-}
-.message-actions button .material-symbols-outlined, .message-cascade-controls button .material-symbols-outlined {
-    font-size: 1rem;
-}
-.message-cascade-controls .cascade-indicator {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    padding: 0 var(--spacing-unit);
-    white-space: nowrap;
-    font-weight: 500;
-}
-.message-cascade-controls .cascade-delete-btn {
-    background-color: var(--bg-button-delete);
-    color: var(--text-light);
-}
-body.dark-mode .message-cascade-controls .cascade-delete-btn {
-    color: var(--text-primary);
-}
-.message-cascade-controls .cascade-delete-btn:hover {
-    background-color: var(--bg-button-delete-hover);
-}
-.message.retrying-hidden {
-    display: none !important;
-}
-
 /* --- Chat Input Area --- */
 .chat-input-area {
     display: flex;
-    align-items: flex-end;
     padding: var(--spacing-unit) calc(var(--spacing-unit) * 2);
     border-top: 1px solid var(--border-primary);
     background-color: var(--bg-primary);
@@ -597,13 +546,15 @@ body.dark-mode #attach-file-btn {
     background-color: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(2px);
 }
-.custom-dialog[open] {
+
+.custom-dialog.animating {
     animation: dialog-fade-in 0.2s ease-out;
 }
 @keyframes dialog-fade-in {
     from { opacity: 0; transform: translate(-50%, -45%); }
     to { opacity: 1; transform: translate(-50%, -50%); }
 }
+
 .custom-dialog .dialog-message {
     margin: 0 0 20px 0;
     font-size: 1rem;
@@ -631,7 +582,12 @@ body.dark-mode #attach-file-btn {
 .param-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; }
 .image-upload-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .background-thumbnail { max-width: 100px; max-height: 60px; border-radius: 4px; border: 1px solid var(--border-tertiary); object-fit: cover; }
-.message-content img { max-width: 100%; height: auto; border-radius: var(--border-radius-md); cursor: pointer; }
+.message-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--border-radius-md);
+    cursor: pointer;
+}
 #image-modal-overlay { background-color: rgba(0, 0, 0, 0.85); }
 .citation-details, .function-call-details { margin-top: var(--spacing-unit); font-size: 0.8rem; border-top: 1px dashed var(--border-secondary); padding-top: var(--spacing-unit); }
 .message-edit-area { margin-top: 5px; }
@@ -767,7 +723,9 @@ body.dark-mode .ripple {
 /* --- Message Actions --- */
 .message-actions, .message-cascade-controls {
     position: absolute;
-    display: none;
+    display: flex; /* 常にflexでレイアウトを確保 */
+    visibility: hidden; /* 初期状態では非表示 */
+    opacity: 0; /* 初期状態では透明 */
     flex-wrap: nowrap;
     gap: var(--spacing-unit);
     background: var(--bg-message-actions);
@@ -775,9 +733,10 @@ body.dark-mode .ripple {
     border-radius: var(--border-radius-md);
     box-shadow: var(--shadow-2);
     z-index: 2;
-    transition: opacity var(--transition-duration) var(--transition-timing);
+    transition: opacity var(--transition-duration) var(--transition-timing), visibility var(--transition-duration) var(--transition-timing);
     width: max-content;
     white-space: nowrap;
+    pointer-events: none; /* 非表示時はクリックできないように */
 }
 .message-actions { bottom: calc(-1 * var(--spacing-unit) * 5.5); }
 .message-cascade-controls {
@@ -785,14 +744,19 @@ body.dark-mode .ripple {
     left: 0;
     align-items: center;
 }
-.message:hover .message-actions,
-.message.show-actions .message-actions { display: flex; }
 
+/* マウスホバー時、またはJSでクラスが付与された時に表示 */
+.message:hover .message-actions,
+.message.show-actions .message-actions,
 .message.model:hover .message-cascade-controls,
-.message.model.show-actions .message-cascade-controls { display: flex; }
+.message.model.show-actions .message-cascade-controls {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto; /* 表示されたらクリックできるように */
+}
 
 .message.user .message-actions { right: 0; }
-.message.model .message-actions { left: 0; }
+.message.model .message-actions { left: var(--spacing-unit); }
 
 .message-actions button, .message-cascade-controls button {
     padding: calc(var(--spacing-unit) * 0.5) var(--spacing-unit);
@@ -826,6 +790,7 @@ body.dark-mode .message-cascade-controls .cascade-delete-btn {
 .message.retrying-hidden {
     display: none !important;
 }
+
 /* --- Layered Image Display --- */
 .layered-image-container {
     position: relative;
@@ -1539,4 +1504,731 @@ body.dark-mode #profile-management-group .profile-actions button:hover {
 }
 body.dark-mode #reload-for-update-btn {
     color: var(--text-primary);
+}
+
+/* --- Wide Mode Styles (for PC) --- */
+@media screen and (min-width: 801px) {
+    body.wide-mode-enabled .app-container {
+        max-width: 1600px;
+    }
+}
+
+/* --- Asset Management Styles --- */
+.asset-count-display {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.asset-actions {
+    display: grid;
+    /* 3つのボタンを均等な幅で横に並べる */
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.asset-actions button {
+    font-size: 0.8rem;
+    padding: 10px 12px;
+    /* アイコンとテキストを中央揃えにする */
+    justify-content: center;
+    background-color: var(--bg-button-action);
+    color: var(--text-light);
+    /* アイコンとテキストの間のスペース */
+    gap: 8px;
+}
+.asset-actions button:hover {
+    background-color: var(--bg-button-action-hover);
+}
+body.dark-mode .asset-actions button {
+    color: var(--text-primary);
+}
+
+
+/* --- Asset Conflict Dialog Styles --- */
+#assetConflictDialog .dialog-title {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+#assetConflictDialog .dialog-actions-main {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 20px;
+}
+#assetConflictDialog .dialog-actions-main .dialog-button {
+    flex-grow: 1;
+    padding: 10px;
+    font-size: 0.8rem;
+    background-color: var(--bg-button-action);
+}
+body.dark-mode #assetConflictDialog .dialog-actions-main .dialog-button {
+    color: var(--text-primary);
+}
+#assetConflictDialog .dialog-actions-sub {
+    margin-top: 15px;
+    border-top: 1px solid var(--border-primary);
+    padding-top: 15px;
+}
+#assetConflictDialog .checkbox-label {
+    justify-content: center;
+    font-size: 0.8rem;
+    margin-bottom: 0;
+}
+
+/* --- Memory Settings --- */
+.settings-group-subsection {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-primary);
+}
+
+#memory-options-container {
+    margin-top: 16px;
+    padding-left: 0; /* 左のパディングを削除してインデントをなくす */
+}
+
+
+/* --- Memory Management Dialog --- */
+#memoryManagementDialog {
+    width: 90%;
+    max-width: 600px;
+}
+
+.dialog-title {
+    font-size: 1.2rem;
+    font-weight: 500;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+}
+
+.memory-list-container {
+    max-height: 40vh;
+    overflow-y: auto;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 16px;
+    padding: 8px;
+    background-color: var(--bg-secondary);
+}
+
+.memory-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px;
+    border-radius: var(--border-radius-sm);
+    background-color: var(--bg-primary);
+    margin-bottom: 8px;
+}
+
+.memory-item-text {
+    flex-grow: 1;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.memory-item-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.memory-item-actions button {
+    padding: 4px;
+    min-width: auto;
+    box-shadow: none;
+}
+.memory-item-actions button .material-symbols-outlined {
+    font-size: 16px;
+}
+
+.memory-add-form {
+    display: flex;
+    gap: 8px;
+}
+
+.memory-add-form textarea {
+    flex-grow: 1;
+    min-height: 60px;
+    height: 60px;
+    margin-bottom: 0;
+}
+
+.memory-add-form button {
+    flex-shrink: 0;
+    align-self: flex-end;
+}
+
+#memory-toggle-btn.active {
+    color: var(--badge-color);
+}
+
+/* --- Header Auto-Hide Feature --- */
+
+/* 機能が有効な時の基本設定 */
+body.header-auto-hide #chat-screen .app-header {
+    transform: translateY(-100%);
+    transition: transform 0.3s ease-in-out;
+    position: absolute;
+    width: 100%;
+    max-width: inherit;
+    z-index: 12;
+}
+
+body.header-auto-hide #chat-screen .main-content {
+    height: 100%;
+}
+
+/* PC向け: 画面上部の透明なトリガーエリア */
+@media (hover: hover) and (pointer: fine) {
+    body.header-auto-hide #header-trigger-area {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 40px;
+        z-index: 11;
+        /* background: rgba(255,0,0,0.2); */ /* デバッグ用 */
+    }
+}
+
+/* JSによってこのクラスが付与されたときにヘッダーを表示 */
+body.header-auto-hide.header-force-show #chat-screen .app-header {
+    transform: translateY(0);
+}
+
+/* --- History Summary Feature --- */
+#summaryDialog {
+    width: 90%;
+    max-width: 700px;
+}
+
+.summary-stats {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-align: center;
+    background-color: var(--bg-tertiary);
+    padding: 8px;
+    border-radius: var(--border-radius-sm);
+}
+
+.summary-editor {
+    width: 100%;
+    min-height: 200px;
+    max-height: 50vh;
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.summary-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.summary-main-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* --- Summary Dialog Description --- */
+.summary-description {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius-md);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+.summary-description p {
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+.summary-description ul {
+    padding-left: 18px;
+    margin: 0;
+}
+.summary-description li {
+    margin-bottom: 4px;
+}
+
+/* --- Summary Marker in Chat --- */
+.summary-marker {
+    width: 80%;
+    margin: 20px auto;
+    text-align: center;
+    border-bottom: 1px dashed var(--border-secondary);
+    position: relative;
+}
+.summary-marker-text {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    padding: 0 10px;
+    position: relative;
+    top: 8px; /* 線の中央に来るように調整 */
+}
+
+/* --- Progress Dialog --- */
+.progress-dialog {
+    text-align: center;
+}
+.progress-dialog .dialog-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 0;
+}
+.progress-dialog .dialog-message {
+    margin-bottom: 0;
+    font-size: 0.9rem;
+}
+.progress-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--bg-tertiary);
+    border-top-color: var(--bg-button);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* --- Floating Action Panel --- */
+.floating-action-panel {
+    position: absolute;
+    top: 60px; /* ヘッダー表示時のデフォルト位置 */
+    left: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 5;
+    opacity: 0; /* 初期状態は非表示 */
+    pointer-events: none; /* 非表示時はクリックできないように */
+    transition: opacity 0.3s ease-in-out, top var(--transition-duration) var(--transition-timing);
+}
+
+.floating-action-panel.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ヘッダー自動非表示が有効な場合、ボタンの初期位置を上に設定 */
+body.header-auto-hide .floating-action-panel {
+    top: 16px;
+}
+
+/* ヘッダー自動非表示が有効で、かつヘッダーが表示されている場合の位置 */
+body.header-auto-hide.header-force-show .floating-action-panel {
+    top: 60px;
+}
+
+.floating-action-panel .floating-action-button {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    /* 半透明の背景色を常に表示 */
+    background-color: rgba(255, 255, 255, 0.8);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    box-shadow: var(--shadow-2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all var(--transition-duration) var(--transition-timing);
+    padding: 0;
+}
+
+.floating-action-panel .floating-action-button .material-symbols-outlined {
+    font-size: 22px;
+}
+
+.floating-action-panel .floating-action-button:hover:not(:disabled) {
+    background-color: var(--bg-button-action);
+    color: #ffffff;
+    box-shadow: var(--shadow-3);
+    transform: scale(1.1);
+}
+
+.floating-action-panel .floating-action-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: scale(1);
+    /* disabledでもデザインを維持 */
+    background-color: rgba(255, 255, 255, 0.8);
+    color: var(--text-disabled);
+    border: 1px solid var(--border-primary);
+}
+
+body.dark-mode .floating-action-panel .floating-action-button {
+    background-color: rgba(40, 40, 40, 0.8);
+    color: var(--text-primary);
+    border-color: var(--border-secondary);
+}
+
+body.dark-mode .floating-action-panel .floating-action-button:hover:not(:disabled) {
+    background-color: var(--bg-button-action-hover);
+    color: #ffffff;
+}
+
+body.dark-mode .floating-action-panel .floating-action-button:disabled {
+    background-color: rgba(40, 40, 40, 0.8);
+    color: var(--text-disabled);
+    border-color: var(--border-secondary);
+}
+
+.floating-action-panel .floating-action-button.active {
+    color: var(--badge-color);
+    /* アクティブ状態が分かりやすいように、少し背景を濃くする */
+    background-color: rgba(255, 255, 255, 0.9); 
+}
+
+body.dark-mode .floating-action-panel .floating-action-button.active {
+    background-color: rgba(60, 60, 60, 0.9);
+}
+
+
+/* --- Asset Management Dialog --- */
+#assetManagementDialog {
+    width: 90%;
+    max-width: 700px;
+}
+
+.asset-list-container {
+    max-height: 60vh;
+    overflow-y: auto;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius-sm);
+    padding: 8px;
+    background-color: var(--bg-secondary);
+}
+
+.asset-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: var(--border-radius-sm);
+    background-color: var(--bg-primary);
+    margin-bottom: 8px;
+    box-shadow: var(--shadow-1);
+}
+.asset-item:last-child {
+    margin-bottom: 0;
+}
+
+.asset-thumbnail {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--border-tertiary);
+    flex-shrink: 0;
+}
+
+.asset-info {
+    flex-grow: 1;
+    min-width: 0; /* flexアイテムの縮小問題を解決 */
+}
+
+.asset-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block; /* ブロック要素にしてellipsisを有効化 */
+}
+
+.asset-details {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.asset-actions-item button {
+    padding: 6px;
+    min-width: auto;
+    box-shadow: none;
+    background-color: var(--bg-button-delete);
+}
+.asset-actions-item button:hover {
+    background-color: var(--bg-button-delete-hover);
+}
+.asset-actions-item button .material-symbols-outlined {
+    font-size: 20px;
+}
+
+/* --- Dialog Delete Button --- */
+.dialog-delete-btn {
+    background-color: var(--bg-button-delete);
+    color: var(--text-light);
+    margin-right: auto; /* 左端に配置 */
+}
+.dialog-delete-btn:hover {
+    background-color: var(--bg-button-delete-hover);
+}
+body.dark-mode .dialog-delete-btn {
+    /* ダークモード時は、背景が明るい赤になるため、文字色を暗くする */
+    color: var(--text-light); /* In dark mode, this variable is a dark color */
+}
+
+/* --- Character Profile Dialog --- */
+#characterProfileDialog {
+    width: 95%;
+    max-width: 800px;
+    height: 80%;
+    max-height: 700px;
+    padding: 0; /* dialog自体のpaddingは不要 */
+    overflow: hidden; /* ラッパーの角丸を有効にするため */
+}
+
+/* 新しいラッパーにFlexboxレイアウトを適用 */
+.dialog-layout-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background-color: var(--bg-primary); /* 背景色をラッパーに移動 */
+}
+
+.profile-dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: calc(var(--spacing-unit) * 2) calc(var(--spacing-unit) * 3);
+    border-bottom: 1px solid var(--border-primary);
+    flex-shrink: 0;
+}
+.profile-dialog-header .dialog-title {
+    margin-bottom: 0;
+}
+.profile-dialog-header .header-button {
+    color: var(--text-primary);
+    box-shadow: none;
+    padding: 4px;
+}
+
+#characterProfileDialog .dialog-content {
+    padding: calc(var(--spacing-unit) * 2) calc(var(--spacing-unit) * 3);
+    overflow-y: auto;
+    flex-grow: 1;
+    min-height: 0;
+}
+
+.profile-dialog-layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 16px;
+    height: 100%;
+}
+
+.profile-character-list {
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius-sm);
+    padding: 8px;
+    background-color: var(--bg-secondary);
+    overflow-y: auto;
+    height: 100%;
+}
+
+.profile-character-item {
+    padding: 10px;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.profile-character-item:hover {
+    background-color: var(--border-primary);
+}
+.profile-character-item.active {
+    background-color: var(--bg-button);
+    color: var(--text-light);
+}
+
+.profile-detail-pane {
+    overflow-y: auto;
+    padding-right: 8px;
+    height: 100%;
+}
+
+.profile-detail-section {
+    margin-bottom: 20px;
+}
+.profile-detail-section label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+.profile-detail-section input,
+.profile-detail-section textarea,
+.profile-detail-section select {
+    margin-bottom: 0;
+}
+.profile-detail-section textarea {
+    min-height: 80px;
+}
+
+.profile-relationships-grid {
+    display: grid;
+    gap: 12px;
+}
+.profile-relationship-card {
+    border: 1px solid var(--border-primary);
+    border-radius: var(--border-radius-sm);
+    padding: 12px;
+    background-color: var(--bg-secondary);
+}
+.profile-relationship-card h5 {
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border-primary);
+    padding-bottom: 6px;
+}
+
+#characterProfileDialog .dialog-actions {
+    padding: calc(var(--spacing-unit) * 2) calc(var(--spacing-unit) * 3);
+    border-top: 1px solid var(--border-primary);
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.dialog-note {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* --- 戻るボタンの表示制御 --- */
+/* デフォルト（PC含む）では、戻るボタンを非表示にする */
+#profile-back-btn {
+    display: none;
+}
+/* スマホサイズで、かつ詳細表示中の場合のみ、表示するように上書きする */
+@media screen and (max-width: 600px) {
+    #characterProfileDialog.details-visible #profile-back-btn {
+        display: inline-flex;
+    }
+}
+
+
+/* Responsive for Mobile */
+@media screen and (max-width: 600px) {
+    .profile-dialog-layout {
+        display: block;
+        height: auto;
+    }
+    .profile-character-list, .profile-detail-pane {
+        height: auto;
+    }
+    .profile-detail-pane {
+        display: none;
+    }
+    #characterProfileDialog.details-visible .profile-character-list {
+        display: none;
+    }
+    #characterProfileDialog.details-visible .profile-detail-pane {
+        display: block;
+    }
+    .profile-character-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .profile-character-item::after {
+        content: '>';
+        color: var(--text-secondary);
+    }
+
+    #profile-back-btn {
+        display: none;
+    }
+    /* スマホで詳細表示中のみ、表示するように上書きする */
+    #characterProfileDialog.details-visible #profile-back-btn {
+        display: inline-flex;
+    }
+}
+
+/* --- Character Profile Dialog Additions --- */
+.profile-detail-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+.profile-detail-section-header label {
+    margin-bottom: 0;
+}
+.add-relationship-btn {
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    min-width: auto;
+    background-color: var(--bg-button-action);
+}
+.add-relationship-btn:hover {
+    background-color: var(--bg-button-action-hover);
+}
+
+.profile-relationship-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border-primary);
+    padding-bottom: 6px;
+}
+.profile-relationship-card-header h5 {
+    margin-bottom: 0;
+    border-bottom: none;
+    padding-bottom: 0;
+}
+.delete-relationship-btn {
+    padding: 4px;
+    min-width: auto;
+    box-shadow: none;
+    background-color: transparent;
+    color: var(--text-secondary);
+}
+.delete-relationship-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-error);
+}
+.delete-relationship-btn .material-symbols-outlined {
+    font-size: 18px;
+}
+
+.profile-delete-character-section {
+    margin-top: 30px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-danger);
+}
+.delete-character-btn {
+    width: 100%;
+    background-color: var(--bg-button-delete);
+    color: var(--text-light);
+}
+.delete-character-btn:hover {
+    background-color: var(--bg-button-delete-hover);
+}
+body.dark-mode .delete-character-btn {
+    color: var(--text-light);
 }

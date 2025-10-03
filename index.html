@@ -24,12 +24,17 @@
         <!-- チャット画面 -->
         <div id="chat-screen" class="screen active">
             <div id="chat-overlay"></div> 
+            <div id="header-trigger-area"></div>
             <header class="app-header">
                 <button id="goto-history-btn" class="header-button" title="履歴一覧へ"><span class="material-symbols-outlined">menu</span></button>
                 <h1 id="chat-title">新規チャット</h1>                
                 <button id="new-chat-btn" class="new-chat-button" title="新規チャットを開始"><span class="material-symbols-outlined">add</span></button>
                 <button id="goto-settings-btn" class="header-button" title="設定へ"><span class="material-symbols-outlined">settings</span></button>
             </header>
+
+
+
+
             <main class="main-content">
                 <!-- システムプロンプト表示/編集エリア -->
                 <div id="system-prompt-area" class="system-prompt-area">
@@ -52,6 +57,24 @@
                 <div id="loading-indicator" class="loading-indicator hidden" aria-live="polite">応答中</div>
             </main>
 
+            <div id="floating-action-panel" class="floating-action-panel">
+                <button id="summarize-history-btn" class="floating-action-button" title="履歴を要約" disabled>
+                    <span class="material-symbols-outlined">article_shortcut</span>
+                </button>
+                <button id="memory-toggle-btn" class="floating-action-button hidden" title="このチャットの長期記憶を切り替え">
+                    <span class="material-symbols-outlined">auto_stories</span>
+                </button>
+                <button id="character-profile-btn" class="floating-action-button" title="キャラクタープロファイル">
+                    <span class="material-symbols-outlined">group</span>
+                </button>
+                <button id="scroll-to-top-btn" class="floating-action-button" title="最上部へ">
+                    <span class="material-symbols-outlined">arrow_upward</span>
+                </button>
+                <button id="scroll-to-bottom-btn" class="floating-action-button" title="最下部へ">
+                    <span class="material-symbols-outlined">arrow_downward</span>
+                </button>
+            </div>
+
             <footer class="chat-input-area">
                 <div id="profile-card-header-wrapper" class="profile-card-wrapper">
                     <div id="profile-card-header" class="profile-card" title="プロファイルを切り替え">
@@ -71,6 +94,7 @@
                 </button>
                 <button id="send-button" title="送信"><span class="material-symbols-outlined">send</span></button>
             </footer>
+
         </div>
 
         <!-- 履歴画面 -->
@@ -158,6 +182,33 @@
                         ※新機能の詳細は<a href="https://github.com/kinkan04/Gemini-PWA-Mk-II" target="_blank" rel="noopener noreferrer">リポジトリ</a>を参照。
                     </p>
                 </div>
+                <div class="settings-group" id="memory-settings-container">
+                    <h3>メモリ機能</h3>
+                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -10px; margin-bottom: 15px;">
+                        チャットを横断してユーザーの好みや指示を記憶し、応答に反映させます。記憶はプロファイルごとに独立して保存されます。
+                    </p>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enable-memory-toggle">
+                        メモリ機能を有効にする
+                    </label>
+                    <div id="memory-options-container" class="hidden">
+                        <label for="memory-auto-save-interval">自動学習の間隔:</label>
+                        <select id="memory-auto-save-interval">
+                            <option value="5">5メッセージごと (デバッグ用)</option>
+                            <option value="10">10メッセージごと</option>
+                            <option value="20">20メッセージごと</option>
+                            <option value="30">30メッセージごと</option>
+                            <option value="40">40メッセージごと</option>
+                            <option value="50">50メッセージごと</option>
+                            <option value="0">自動学習OFF</option>
+                        </select>
+                        <p style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
+                            ※ユーザーのメッセージ送信を1回としてカウントします。
+                        </p>
+                        <button id="manage-memory-btn" class="settings-action-button" style="margin-top: 16px;">記憶を管理する</button>
+                    </div>
+                </div>
+
                 <div class="settings-group">
                     <h3>基本設定</h3>
                     <label for="api-key">Gemini APIキー:</label>
@@ -209,18 +260,8 @@
                     <details style="margin-top: 15px;">
                         <summary style="cursor: pointer; font-weight: normal; font-size: 14px; color: var(--text-link); margin-bottom: 10px;">その他パラメータ</summary>
                         <div class="param-grid">
-                             <div>
-                                <label for="presence-penalty">Presence Penalty:</label>
-                                <input type="number" id="presence-penalty" step="0.1" min="-2.0" max="1.9" placeholder="例:0.0 (-2.0～2.0未満)" aria-label="Presence Penalty">
-                             </div>
-                             <div>
-                                <label for="frequency-penalty">Frequency Penalty:</label>
-                                <input type="number" id="frequency-penalty" step="0.1" min="-2.0" max="1.9" placeholder="例:0.0 (-2.0～2.0未満)" aria-label="Frequency Penalty">
-                            </div>
+                            <!-- Presence PenaltyとFrequency Penaltyの入力欄を削除 -->
                         </div>
-                        <p style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">
-                            ※ Presence/Frequency Penaltyは一部モデルでは非対応、APIエラーとなる場合あり
-                        </p>
                         <p style="height:16px;"></p>
                         <div class="param-grid">
                             <div>
@@ -392,6 +433,18 @@
                     </div>
                 </div>
                 <div class="settings-group">
+                    <h3>履歴の要約機能</h3>
+                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -10px; margin-bottom: 15px;">
+                        チャット履歴が長くなった際に、AIに送信するコンテキストを要約して応答品質の低下を防ぎます。
+                    </p>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enable-summary-button-toggle">
+                        チャット画面に要約ボタンを表示する
+                    </label>
+                    <label for="summary-system-prompt">要約実行時のシステムプロンプト:</label>
+                    <textarea id="summary-system-prompt" placeholder="要約を実行するAIへの指示を入力します。" aria-label="要約実行時のシステムプロンプト"></textarea>
+                </div>
+                <div class="settings-group">
                     <h3>イメージ画像</h3>
                     <label>チャット画面の背景画像:</label>
                     <div class="image-upload-controls">
@@ -419,14 +472,46 @@
                        ※ 可読性のため画像の上に半透明のレイヤーを表示。
                      </p>
                 </div>
+                <div class="settings-group">
+                    <h3>保存済み画像アセット</h3>
+                    <p id="asset-count-display" class="asset-count-display">現在 ... 枚のアセットが保存されています。</p>
+                    <div class="asset-actions">
+                        <button id="asset-import-btn"><span class="material-symbols-outlined">download</span> アセットを取込</button>
+                        <button id="manage-assets-btn"><span class="material-symbols-outlined">inventory</span> アセットを管理</button>
+                        <button id="asset-export-btn"><span class="material-symbols-outlined">upload</span> アセットを出力</button>
+                        <input type="file" id="asset-import-input" accept=".zip,application/zip" class="hidden">
+                    </div>
+
+                    <p class="profile-actions-note">
+                        ※ Zip形式でアセットを一括で入出力します。<br>
+                        ※ 取込（インポート）は、既存のアセットにファイルを追加します。<br>
+                        ※ 同名のアセットが見つかった場合は、上書きするか確認します。
+                    </p>
+                </div>
+
 
                 <div class="settings-group">
                    <h3>その他設定</h3>
+                   <label class="checkbox-label">
+                        <input type="checkbox" id="header-auto-hide-toggle">
+                        チャット画面のヘッダーを自動的に隠す
+                    </label>
+                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
+                        ※ PCではマウスオーバー、スマホではタップで表示されます。
+                    </p>
                     <label class="checkbox-label">
                        <input type="checkbox" id="enter-to-send">
                        Enterキーで送信する
                    </label>
                    <p style="height:10px"></p>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enable-wide-mode-toggle">
+                        PC表示時にワイドモードを有効にする
+                    </label>
+                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
+                        ※ 画面幅が800px以上の場合に、チャット画面の横幅を広げます。
+                    </p>
+
                    <label class="checkbox-label">
                     <input type="checkbox" id="auto-scroll-toggle">
                             メッセージの更新後に自動的に最下部へスクロールする
@@ -452,6 +537,14 @@
                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
                        ※ 没入感を高めたい場合に。非表示でも機能は有効。
                    </p>
+                   <!-- フローティングボタン -->
+                   <label for="floating-panel-behavior">フローティングボタンの表示:</label>
+                   <select id="floating-panel-behavior" aria-label="フローティングボタンの表示">
+                       <option value="on-click">クリック/タップで表示 (時間経過で非表示)</option>
+                       <option value="always">常時表示</option>
+                       <option value="hidden">常時非表示</option>
+                   </select>
+                   <!-- 履歴のソート順 -->
                    <label for="history-sort-order">履歴のソート順:</label>
                    <select id="history-sort-order" aria-label="履歴のソート順">
                        <option value="updatedAt">更新日時 (新しい順)</option>
@@ -474,6 +567,8 @@
                    <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
                        ※ 追加後は設定を保存の上、ページをリロード。
                    </p>
+
+                   
                 </div>
 
                 <div class="danger-zone">
@@ -549,13 +644,119 @@
         <span id="image-modal-close">×</span>
         <img id="image-modal-img" src="" alt="拡大画像">
     </div>
+        <!-- Asset Conflict Dialog -->
+        <dialog id="assetConflictDialog" class="custom-dialog">
+            <h3 class="dialog-title">アセットの競合</h3>
+            <p class="dialog-message"></p>
+            <div class="dialog-actions-main">
+                <button value="overwrite" class="dialog-button">上書き</button>
+                <button value="skip" class="dialog-button">スキップ</button>
+                <button value="rename" class="dialog-button">両方保存</button>
+            </div>
+            <div class="dialog-actions-sub">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="apply-to-all-checkbox">
+                    以降のすべての競合にこの選択を適用する
+                </label>
+            </div>
+        </dialog>
+        <!-- Memory Management Dialog -->
+        <dialog id="memoryManagementDialog" class="custom-dialog">
+            <h3 class="dialog-title">記憶の管理</h3>
+            <div class="dialog-content">
+                <div id="memory-list-container" class="memory-list-container">
+                    <!-- 記憶項目がここに表示されます -->
+                </div>
+                <div class="memory-add-form">
+                    <textarea id="new-memory-input" placeholder="新しい記憶を追加..."></textarea>
+                    <button id="add-memory-btn">追加</button>
+                </div>
+            </div>
+            <div class="dialog-actions" style="justify-content: space-between; align-items: center;">
+                <button id="delete-all-memory-btn" value="delete_all" class="dialog-delete-btn">全て削除</button>
+                <button id="close-memory-dialog-btn" value="close">閉じる</button>
+            </div>
+        </dialog>
+
+    
         <!-- App Update Notification -->
         <div id="update-notification" class="update-notification hidden">
             <span>新しいバージョンが利用可能です。</span>
             <button id="reload-for-update-btn">更新</button>
         </div>
-    
-    <script src="prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/" defer></script>
 
+        <!-- Progress Dialog -->
+        <dialog id="progressDialog" class="custom-dialog progress-dialog">
+            <div class="dialog-content">
+                <div class="progress-spinner"></div>
+                <p id="progress-message" class="dialog-message"></p>
+            </div>
+        </dialog>
+
+        <!-- Summary Dialog -->
+        <dialog id="summaryDialog" class="custom-dialog">
+            <h3 class="dialog-title">履歴の要約</h3>
+            <div class="dialog-content">
+                <div class="summary-description">
+                    <p>APIに送信する会話履歴を要約し、コンテキストを圧縮します。</p>
+                    <ul>
+                        <li>ユーザーから見える会話履歴は変更されません。</li>
+                        <li>要約文は会話ログと紐づいてDBに保存されており、会話ログを削除すると一緒に削除されます。</li>
+                        <li>会話ログをエクスポート/インポートした場合、要約ログもその対象になります。</li>
+                        <li>要約後に会話を続けて再度要約を行うと、前回の要約文に新しい要約内容が追記されます。</li>
+                        <li>APIには「冒頭5件」+「前回の要約文（あれば）」+「今回の要約文」+「最新15件」が送信されます。</li>
+                    </ul>
+                </div>
+                <p id="summary-stats" class="summary-stats"></p>
+                <textarea id="summary-editor" class="summary-editor" rows="10"></textarea>
+            </div>
+            <div class="dialog-actions summary-actions">
+                <button id="summary-cancel-btn" value="cancel" class="dialog-cancel-btn">キャンセル</button>
+                <div class="summary-main-actions">
+                    <button id="summary-regenerate-btn" value="regenerate">再生成</button>
+                    <button id="summary-confirm-btn" value="confirm" class="dialog-ok-btn">決定</button>
+                </div>
+            </div>
+        </dialog>
+
+        <!-- Asset Management Dialog -->
+        <dialog id="assetManagementDialog" class="custom-dialog">
+            <h3 class="dialog-title">アセットの管理</h3>
+            <div class="dialog-content">
+                <div id="asset-list-container" class="asset-list-container">
+                    <!-- アセット項目がここに表示されます -->
+                </div>
+            </div>
+            <div class="dialog-actions" style="justify-content: space-between; align-items: center;">
+                <button id="delete-all-assets-btn" value="delete_all" class="dialog-delete-btn">全て削除</button>
+                <button id="close-asset-dialog-btn" value="close">閉じる</button>
+            </div>
+        </dialog>
+
+        <!-- Character Profile Dialog -->
+        <dialog id="characterProfileDialog" class="custom-dialog">
+            <!-- このラッパーdivを追加 -->
+            <div class="dialog-layout-wrapper">
+                <div class="profile-dialog-header">
+                    <button id="profile-back-btn" class="header-button" title="リストに戻る"><span class="material-symbols-outlined">arrow_back_ios</span></button>
+                    <h3 class="dialog-title">キャラクタープロファイル</h3>
+                </div>
+                <div class="dialog-content profile-dialog-layout">
+                    <div id="character-list-pane" class="profile-character-list">
+                        <!-- キャラクターリストがここに表示されます -->
+                    </div>
+                    <div id="character-detail-pane" class="profile-detail-pane">
+                        <!-- キャラクター詳細がここに表示されます -->
+                    </div>
+                </div>
+                <div class="dialog-actions">
+                    <span class="dialog-note">※編集内容は自動的に保存されます</span>
+                    <button id="close-profile-dialog-btn" value="close">閉じる</button>
+                </div>
+            </div>
+        </dialog>
+
+    <script src="prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </body>
 </html>

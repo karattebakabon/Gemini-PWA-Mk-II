@@ -31,49 +31,16 @@
 };
 
 /**
- * 画像Blobを受け取り、WebPに変換するヘルパー関数
- * @param {Blob} originalBlob - 変換元の画像Blob
- * @returns {Promise<Blob>} 変換後のWebP Blob、または変換に失敗した場合は元のBlob
+ * キャラクター名を正規化（統一形式に変換）するヘルパー関数
+ * @param {string} name - 正規化するキャラクター名
+ * @returns {string} 正規化されたキャラクター名
  */
- function convertBlobToWebP(originalBlob) {
-    return new Promise((resolve, reject) => {
-        // FileReaderでBlobをData URLに変換
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-
-                // CanvasをWebP Blobに変換 (品質0.9)
-                canvas.toBlob((webpBlob) => {
-                    if (webpBlob) {
-                        console.log(`[WebP Converter] 変換成功: ${originalBlob.size} bytes -> ${webpBlob.size} bytes`);
-                        resolve(webpBlob);
-                    } else {
-                        // 変換に失敗した場合は元のBlobをそのまま返す
-                        console.warn("[WebP Converter] WebPへの変換に失敗しました。元の形式を使用します。");
-                        resolve(originalBlob);
-                    }
-                }, 'image/webp', 0.9);
-            };
-            img.onerror = () => {
-                console.error("[WebP Converter] 画像データの読み込みに失敗しました。");
-                // エラー時も元のBlobを返すことで処理を続行させる
-                resolve(originalBlob);
-            };
-            img.src = e.target.result;
-        };
-        reader.onerror = () => {
-            console.error("[WebP Converter] FileReaderでBlobの読み込みに失敗しました。");
-            // エラー時も元のBlobを返す
-            resolve(originalBlob);
-        };
-        reader.readAsDataURL(originalBlob);
-    });
+ function normalizeCharacterName(name) {
+    if (typeof name !== 'string') return '';
+    return name
+        .trim() // 前後の空白を削除
+        .replace(/\s+/g, ' ') // 連続する空白を半角スペース1つに統一
+        .replace(/･/g, '・');
 }
 
 
@@ -135,17 +102,24 @@
  * @param {object} chat - 現在のチャットデータ
  * @returns {Promise<object>} 操作結果を含むオブジェクト
  */
- async function manage_image_assets({ action, asset_name, source_image_message_index }, chat) {
+async function manage_image_assets({ action, asset_name, source_image_message_index }, chat) {
     console.log(`[Function Calling] manage_image_assetsが呼び出されました。`, { action, asset_name, source_image_message_index });
     
+    // 'delete' と 'delete_all' を許可しないようにバリデーションを追加
+    if (['delete', 'delete_all'].includes(action)) {
+        return { error: "この関数によるアセットの削除は許可されていません。設定画面から手動で削除してください。" };
+    }
     if (!action) {
         return { error: "引数 'action' は必須です。" };
     }
-    if (!['list', 'delete_all'].includes(action) && !asset_name) {
+    if (!['list'].includes(action) && !asset_name) {
         return { error: `アクション '${action}' には 'asset_name' が必須です。` };
     }
 
     try {
+        let result;
+        let updateCount = false;
+
         switch (action) {
             case "save": {
                 if (typeof source_image_message_index !== 'number') {
@@ -168,16 +142,17 @@
                     return { error: `指定されたメッセージから保存可能な画像が見つかりませんでした。` };
                 }
 
-                // 取得したBlobをWebPに変換
-                const webpBlob = await convertBlobToWebP(imageBlob);
+                const webpBlob = await appLogic.convertBlobToWebP(imageBlob);
 
                 const newAsset = {
                     name: asset_name,
-                    blob: webpBlob, // 変換後のBlobを保存
+                    blob: webpBlob,
                     createdAt: new Date()
                 };
                 await assetDB.save(newAsset);
-                return { success: true, message: `画像アセット「${asset_name}」をWebP形式で保存しました。` };
+                result = { success: true, message: `画像アセット「${asset_name}」をWebP形式で保存しました。` };
+                updateCount = true;
+                break;
             }
             case "get": {
                 const asset = await assetDB.get(asset_name);
@@ -187,7 +162,7 @@
                 
                 const tempImageId = await window.appLogic.saveImageBlob(asset.blob);
 
-                return {
+                result = {
                     success: true,
                     message: `画像アセット「${asset_name}」を取得しました。`,
                     _internal_ui_action: {
@@ -195,39 +170,27 @@
                         imageIds: [tempImageId]
                     }
                 };
-            }
-            case "delete": {
-                await assetDB.delete(asset_name);
-                return { success: true, message: `画像アセット「${asset_name}」を削除しました。` };
+                break;
             }
             case "list": {
                 const keys = await assetDB.list();
-                return { success: true, count: keys.length, asset_names: keys };
-            }
-            case "delete_all": {
-                const keys = await assetDB.list();
-                const count = keys.length;
-                if (count === 0) {
-                    return { success: true, message: "削除する画像アセットはありませんでした。" };
-                }
-                await new Promise((resolve, reject) => {
-                    const request = window.state.db.transaction('image_assets', 'readwrite').objectStore('image_assets').clear();
-                    request.onsuccess = () => resolve();
-                    request.onerror = () => reject(request.error);
-                });
-                return { success: true, message: `${count}件の画像アセットをすべて削除しました。` };
+                result = { success: true, count: keys.length, asset_names: keys };
+                break;
             }
             default:
                 return { error: `無効なアクションです: ${action}` };
         }
+
+        if (updateCount && window.appLogic && typeof window.appLogic.updateAssetCount === 'function') {
+            setTimeout(() => window.appLogic.updateAssetCount(), 0);
+        }
+        return result;
+
     } catch (error) {
         console.error(`[Function Calling] manage_image_assetsでエラーが発生しました:`, error);
         return { error: `内部エラーが発生しました: ${error.message}` };
     }
 }
-
-
-
 
 
 /**
@@ -701,160 +664,6 @@ async function manage_game_date({ action, days = 1 }, chat) { // chat引数を�
       return { error: `内部エラーが発生しました: ${error.message}` };
   }
 }
-
-/**
- * キャラクター間の関係値（好感度、信頼度など）を多軸で管理する関数
- * @param {object} args - AIによって提供される引数オブジェクト
- * @param {string} args.source_character - 関係の主体となるキャラクター名
- * @param {string} args.target_character - 関係の対象となるキャラクター名
- * @param {string} args.axis - 操作する関係の軸 (例: "好感度", "信頼度", "緊張度")
- * @param {string} args.action - "set", "increase", "decrease", "get", "get_all_axes", "get_all_from_source" のいずれか
- * @param {number} [args.value] - "set", "increase", "decrease" アクションで使用する数値
- * @param {number} [args.clamp_min] - 関係値の下限値
- * @param {number} [args.clamp_max] - 関係値の上限値
- * @param {number} [args.days_to_decay] - 何日間更新がないと減衰が始まるか
- * @param {number} [args.decay_value] - 1日あたりに減衰する値 (通常は負の数)
- * @returns {Promise<object>} 操作結果を含むオブジェクトを返すPromise
- */
- async function manage_relationship(args, chat) {
-  console.log(`[Function Calling] manage_relationshipが呼び出されました。`, args);
-
-  const {
-    source_character,
-    target_character,
-    axis,
-    action,
-    value,
-    clamp_min,
-    clamp_max,
-    days_to_decay,
-    decay_value,
-  } = args;
-
-  if (!action) return { error: "引数 'action' は必須です。" };
-  if (!source_character) return { error: "引数 'source_character' は必須です。" };
-
-  // axis未指定時のデフォルト（好感度）
-  const needsAxis = ["get", "set", "increase", "decrease"].includes(action);
-  const axisName = needsAxis ? (axis || "好感度") : null;
-
-  // target_character 必須チェック（get_all_from_source 以外）
-  if (["get", "set", "increase", "decrease", "get_all_axes"].includes(action) && !target_character) {
-    return { error: `アクション '${action}' には 'target_character' が必須です。` };
-  }
-
-  // 軸必須の操作なのに最終的に軸が決まっていない場合
-  if (needsAxis && !axisName) {
-    return { error: `アクション '${action}' には 'axis' が必須です。` };
-  }
-
-  // 値が必要な操作
-  if (["set", "increase", "decrease"].includes(action) && typeof value !== "number") {
-    return { error: `アクション '${action}' には数値型の 'value' が必要です。` };
-  }
-
-  try {
-    if (!chat.persistentMemory) chat.persistentMemory = {};
-    if (!chat.persistentMemory.relationships) chat.persistentMemory.relationships = {};
-    if (typeof chat.persistentMemory.game_day !== "number") chat.persistentMemory.game_day = 1;
-
-    const relationships = chat.persistentMemory.relationships;
-    const currentGameDay = chat.persistentMemory.game_day;
-
-    const calculateDecay = (currentValue, lastUpdatedDay) => {
-      if (typeof days_to_decay !== "number" || typeof decay_value !== "number") return currentValue;
-      const elapsedDays = currentGameDay - lastUpdatedDay;
-      if (elapsedDays > days_to_decay) {
-        const decayDays = elapsedDays - days_to_decay;
-        const totalDecay = decayDays * decay_value;
-        return currentValue + totalDecay;
-      }
-      return currentValue;
-    };
-
-    const getRelation = (source, target, axisKey) => {
-      if (!relationships[source]) relationships[source] = {};
-      if (!relationships[source][target]) relationships[source][target] = {};
-      if (!relationships[source][target][axisKey]) {
-        relationships[source][target][axisKey] = { value: 0, last_updated_day: currentGameDay };
-      }
-      return relationships[source][target][axisKey];
-    };
-
-    let message = "";
-    let resultData = {};
-
-    switch (action) {
-      case "get": {
-        const relation = getRelation(source_character, target_character, axisName);
-        const decayedValue = calculateDecay(relation.value, relation.last_updated_day);
-        message = `${source_character}から${target_character}への${axisName}は現在 ${decayedValue} です。`;
-        resultData = { success: true, value: decayedValue, message };
-        break;
-      }
-      case "set":
-      case "increase":
-      case "decrease": {
-        const relation = getRelation(source_character, target_character, axisName);
-        const decayedBase = action === "set" ? relation.value : calculateDecay(relation.value, relation.last_updated_day);
-        let newValue;
-        if (action === "increase") newValue = decayedBase + value;
-        else if (action === "decrease") newValue = decayedBase - value;
-        else newValue = value;
-
-        if (typeof clamp_max === "number") newValue = Math.min(newValue, clamp_max);
-        if (typeof clamp_min === "number") newValue = Math.max(newValue, clamp_min);
-
-        relation.value = newValue;
-        relation.last_updated_day = currentGameDay;
-
-        message = `${source_character}から${target_character}への${axisName}が更新され、${newValue}になりました。`;
-        resultData = { success: true, new_value: newValue, message };
-        break;
-      }
-      case "get_all_axes": {
-        if (!relationships[source_character] || !relationships[source_character][target_character]) {
-          return { success: true, relations: {}, message: `${source_character}から${target_character}への関係はまだ設定されていません。` };
-        }
-        const targetRelations = relationships[source_character][target_character];
-        const allAxes = {};
-        for (const axisKey in targetRelations) {
-          const rel = targetRelations[axisKey];
-          allAxes[axisKey] = calculateDecay(rel.value, rel.last_updated_day);
-        }
-        message = `${source_character}から${target_character}への全関係軸を取得しました。`;
-        resultData = { success: true, relations: allAxes, message };
-        break;
-      }
-      case "get_all_from_source": {
-        if (!relationships[source_character]) {
-          return { success: true, relations: {}, message: `${source_character}の人間関係はまだ設定されていません。` };
-        }
-        const sourceRelations = relationships[source_character];
-        const allRelations = {};
-        for (const targetName in sourceRelations) {
-          allRelations[targetName] = {};
-          for (const axisKey in sourceRelations[targetName]) {
-            const rel = sourceRelations[targetName][axisKey];
-            allRelations[targetName][axisKey] = calculateDecay(rel.value, rel.last_updated_day);
-          }
-        }
-        message = `${source_character}が持つ全ての人間関係を取得しました。`;
-        resultData = { success: true, relations: allRelations, message };
-        break;
-      }
-      default:
-        return { error: `無効なアクションです: ${action}` };
-    }
-
-    console.log(`[Function Calling] 処理完了:`, resultData);
-    return resultData;
-  } catch (error) {
-    console.error(`[Function Calling] manage_relationshipでエラーが発生しました:`, error);
-    return { error: `内部エラーが発生しました: ${error.message}` };
-  }
-}
-
 
 /**
  * 指定された範囲内のランダムな整数を生成します。
@@ -1588,6 +1397,11 @@ async function generate_image(args = {}) {
         return { error: "引数 'source_images' は必須であり、少なくとも1つの画像ソースを含む配列である必要があります。" };
     }
 
+    // --- [DEBUG] ログ追加 START ---
+    const logPrefix = "[edit_image DEBUG]";
+    console.log(`${logPrefix} 処理開始。プロンプト: "${prompt}"`);
+    // --- [DEBUG] ログ追加 END ---
+
     try {
         const ai = (window.ai instanceof GoogleGenAI)
             ? window.ai
@@ -1595,12 +1409,14 @@ async function generate_image(args = {}) {
         
         const imageParts = [];
 
-        for (const source of source_images) {
+        for (const [index, source] of source_images.entries()) {
             let imageBlob = null;
-            if (typeof source.message_index === 'number') {
-                const messages = chat.messages || [];
+            let sourceType = '';
 
-                // AIが指定したインデックスをそのまま使用する
+            if (typeof source.message_index === 'number') {
+                sourceType = `message_index: ${source.message_index}`;
+                console.log(`${logPrefix} [${index+1}/${source_images.length}] 画像ソース (${sourceType}) の処理を開始...`);
+                const messages = chat.messages || [];
                 const targetIndex = messages.length - 1 - source.message_index;
 
                 if (targetIndex < 0 || targetIndex >= messages.length) {
@@ -1613,12 +1429,15 @@ async function generate_image(args = {}) {
                 if (!imageBlob) throw new Error(`指定されたメッセージ(インデックス: ${source.message_index})から画像が見つかりません。`);
 
             } else if (typeof source.asset_name === 'string') {
+                sourceType = `asset_name: "${source.asset_name}"`;
+                console.log(`${logPrefix} [${index+1}/${source_images.length}] 画像ソース (${sourceType}) の処理を開始...`);
                 const asset = await assetDB.get(source.asset_name);
                 if (!asset || !asset.blob) throw new Error(`画像アセット「${source.asset_name}」が見つかりません。`);
                 imageBlob = asset.blob;
             }
 
             if (imageBlob) {
+                console.log(`${logPrefix} [${index+1}/${source_images.length}] 画像Blobの取得に成功。サイズ: ${imageBlob.size} bytes, タイプ: ${imageBlob.type}`);
                 const base64Data = await window.appLogic.fileToBase64(imageBlob);
                 imageParts.push({
                     inlineData: {
@@ -1626,20 +1445,24 @@ async function generate_image(args = {}) {
                         data: base64Data
                     }
                 });
+            } else {
+                console.warn(`${logPrefix} [${index+1}/${source_images.length}] 有効な画像ソースが見つかりませんでした。`);
             }
         }
 
         if (imageParts.length === 0) {
+            console.error(`${logPrefix} 処理可能な画像ソースが0件でした。処理を中断します。`);
             return { error: "編集対象の有効な画像ソースが見つかりませんでした。" };
         }
 
-        // 画像パーツの配列に、テキストプロンプトも追加する
         imageParts.push({ text: prompt });
 
+        console.log(`${logPrefix} APIリクエストを送信します。画像パーツ数: ${imageParts.length - 1}`);
         const resp = await ai.models.generateContent({
             model: "gemini-2.5-flash-image-preview",
             contents: imageParts
         });
+        console.log(`${logPrefix} APIから応答を受信しました。`, resp);
 
         const editedImagesBase64 = [];
         const gen = resp?.candidates?.[0]?.content?.parts || [];
@@ -1652,17 +1475,24 @@ async function generate_image(args = {}) {
             }
         }
 
+        console.log(`${logPrefix} API応答から ${editedImagesBase64.length} 件の画像データを抽出しました。`);
+
         if (editedImagesBase64.length === 0) {
+            console.error(`${logPrefix} API応答に画像データが含まれていませんでした。処理を終了します。`);
             return { success: false, error: { message: "画像の編集に失敗しました。APIからの応答に画像が含まれていません。" } };
         }
 
         const imageIds = [];
-        for (const imgData of editedImagesBase64) {
+        for (const [index, imgData] of editedImagesBase64.entries()) {
+            console.log(`${logPrefix} [${index+1}/${editedImagesBase64.length}] Base64からBlobへの変換を開始...`);
             const imageBlob = await window.appLogic.base64ToBlob(imgData.data, imgData.mimeType);
+            console.log(`${logPrefix} [${index+1}/${editedImagesBase64.length}] Blob変換成功。DBへの保存を開始...`);
             const newImageId = await window.appLogic.saveImageBlob(imageBlob);
+            console.log(`${logPrefix} [${index+1}/${editedImagesBase64.length}] DB保存成功。新しいID: ${newImageId}`);
             imageIds.push(newImageId);
         }
 
+        console.log(`${logPrefix} 全ての処理が成功しました。UI更新アクションを返します。`);
         return {
             success: true,
             message: "画像の編集と保存に成功しました。",
@@ -1678,7 +1508,7 @@ async function generate_image(args = {}) {
         };
 
     } catch (err) {
-        console.error("[edit_image] error object:", err);
+        console.error(`${logPrefix} エラーが発生しました:`, err);
         let errorMessage = "An unknown error occurred.";
         if (err.message) errorMessage = err.message;
         
@@ -1691,6 +1521,117 @@ async function generate_image(args = {}) {
         };
     }
 }
+
+/**
+ * キャラクターの記憶、関係性、状態を統合的に管理する関数
+ * @param {object} args - AIによって提供される引数オブジェクト
+ * @returns {Promise<object>} 操作結果を含むオブジェクトを返すPromise
+ */
+ async function manage_character_memory(args, chat) {
+    const {
+        character_name,
+        action,
+        status,
+        current_location,
+        summary,
+        short_term_goal,
+        relationship_target,
+        relationship_affinity,
+        relationship_context
+    } = args;
+
+    console.log(`[Function Calling] manage_character_memoryが呼び出されました。`, args);
+
+    if (!character_name || !action) {
+        return { error: "引数 'character_name' と 'action' は必須です。" };
+    }
+
+    try {
+        if (!chat.persistentMemory) chat.persistentMemory = {};
+        
+        const normalizedCharName = normalizeCharacterName(character_name);
+        const memoryKey = `character_memory_${normalizedCharName}`;
+
+        // persistentMemory内をループして、正規化後の名前が一致する既存のキーを探す
+        let existingKey = null;
+        for (const key in chat.persistentMemory) {
+            if (key.startsWith('character_memory_')) {
+                const existingName = key.replace('character_memory_', '');
+                if (normalizeCharacterName(existingName) === normalizedCharName) {
+                    existingKey = key;
+                    break;
+                }
+            }
+        }
+        
+        const finalMemoryKey = existingKey || memoryKey;
+
+        switch (action) {
+            case "get": {
+                const memory = chat.persistentMemory[finalMemoryKey] || null;
+                if (!memory) {
+                    return { success: false, message: `キャラクター「${character_name}」の記憶はまだありません。` };
+                }
+                return { success: true, memory_data: memory };
+            }
+
+            case "update": {
+                // 既存のデータを取得するか、なければ新規作成する
+                const memory = chat.persistentMemory[finalMemoryKey] || {};
+
+                // 各キーを上書き
+                if (status !== undefined) memory.status = status;
+                if (current_location !== undefined) memory.current_location = current_location;
+                if (summary !== undefined) memory.summary = summary;
+                if (short_term_goal !== undefined) memory.short_term_goal = short_term_goal;
+
+                // 関係性の処理
+                if (relationship_target) {
+                    if (!memory.relationships) memory.relationships = {};
+                    
+                    const normalizedTargetName = normalizeCharacterName(relationship_target);
+                    if (!memory.relationships[normalizedTargetName]) memory.relationships[normalizedTargetName] = {};
+                    
+                    const targetRelation = memory.relationships[normalizedTargetName];
+
+                    if (relationship_affinity !== undefined) {
+                        targetRelation.affinity = relationship_affinity;
+                    }
+                    if (relationship_context !== undefined && String(relationship_context).trim() !== '') {
+                        if (targetRelation.context) {
+                            targetRelation.context += `\n${relationship_context}`;
+                        } else {
+                            targetRelation.context = relationship_context;
+                        }
+                    }
+                }
+                
+                // 最終的なキーでデータを保存
+                chat.persistentMemory[finalMemoryKey] = memory;
+                
+                return { success: true, message: `キャラクター「${character_name}」の記憶を更新しました。`, updated_memory: memory };
+            }
+
+            case "delete": {
+                if (chat.persistentMemory[finalMemoryKey]) {
+                    delete chat.persistentMemory[finalMemoryKey];
+                    return { success: true, message: `キャラクター「${character_name}」の記憶を削除しました。` };
+                } else {
+                    return { success: false, message: `キャラクター「${character_name}」の記憶は存在しません。` };
+                }
+            }
+
+            default:
+                return { error: `無効なアクションです: ${action}` };
+        }
+    } catch (error) {
+        console.error(`[Function Calling] manage_character_memoryでエラーが発生しました:`, error);
+        return { error: `内部エラーが発生しました: ${error.message}` };
+    }
+}
+
+
+
 
 
 
@@ -1727,7 +1668,6 @@ window.functionCallingTools = {
   manage_scene: manage_scene,
   manage_flags: manage_flags,
   manage_game_date: manage_game_date,
-  manage_relationship: manage_relationship,
   get_random_integer: get_random_integer,
   get_random_choice: get_random_choice,
   generate_random_string: generate_random_string,
@@ -1738,7 +1678,8 @@ window.functionCallingTools = {
   display_layered_image: display_layered_image,
   generate_video: generate_video,
   generate_image: generate_image,
-  edit_image: edit_image
+  edit_image: edit_image,
+  manage_character_memory: manage_character_memory
 };
 
 
@@ -1749,7 +1690,7 @@ window.functionCallingTools = {
 window.functionDeclarations = [
   {
       "function_declarations": [
-          {
+        {
             "name": "manage_image_assets",
             "description": "ユーザーが提供した画像を、後から再利用できるように名前を付けてアプリ内に永続的に保存・管理します。キャラクターの立ち絵や背景など、繰り返し使用する画像を保存するのに使用します。",
             "parameters": {
@@ -1757,7 +1698,7 @@ window.functionDeclarations = [
                 "properties": {
                     "action": {
                         "type": "STRING",
-                        "description": "実行する操作を選択します。'save': 画像を保存/上書き, 'get': 保存済み画像を取得して表示, 'delete': 画像を削除, 'list': 保存されている全画像の名前を一覧表示。 'delete_all': 保存されている全ての画像を削除。"
+                        "description": "実行する操作を選択します。'save': 画像を保存/上書き, 'get': 保存済み画像を取得して表示, 'list': 保存されている全画像の名前を一覧表示。"
                     },
                     "asset_name": {
                         "type": "STRING",
@@ -1984,52 +1925,6 @@ window.functionDeclarations = [
                     }
                 },
                 "required": ["action"]
-            }
-          },
-          {
-            "name": "manage_relationship",
-            "description": "キャラクター間の関係値（好感度、信頼度など）を多軸で管理し、キャラクターの感情や態度を決定するために使用します。重要：キャラクターと久しぶりに会話する場合など、応答を生成する前には、まず'get'アクションで現在の関係値を確認してください。これにより、ゲーム内時間経過による関係性の変化（減衰）が会話の第一声に反映され、自然なやり取りが実現できます。",
-            "parameters": {
-                "type": "OBJECT",
-                "properties": {
-                    "action": {
-                        "type": "STRING",
-                        "description": "実行する操作。'set':値を直接設定。'increase':値を増加。'decrease':値を減少。'get':特定の一つの関係値を取得。'get_all_axes':特定相手への全関係軸の値を取得。'get_all_from_source':自分が持つ全人間関係を取得。"
-                    },
-                    "source_character": {
-                        "type": "STRING",
-                        "description": "関係の主体となるキャラクターの名前。'get_all_from_source'ではこのキャラクターの視点から関係性を取得します。基本的には対象のヒロインの名前が入ります。"
-                    },
-                    "target_character": {
-                        "type": "STRING",
-                        "description": "関係の対象となるキャラクターの名前。'get_all_from_source'アクション以外では必須です。"
-                    },
-                    "axis": {
-                        "type": "STRING",
-                        "description": "操作対象の関係軸。例: '好感度', '信頼度', '緊張度', '恐怖'。'get_all_axes'と'get_all_from_source'アクション以外では必須です。"
-                    },
-                    "value": {
-                        "type": "NUMBER",
-                        "description": "'set', 'increase', 'decrease'アクションで使用する数値。"
-                    },
-                    "clamp_min": {
-                        "type": "NUMBER",
-                        "description": "任意。関係値がこの値を下回らないようにするための下限値。"
-                    },
-                    "clamp_max": {
-                        "type": "NUMBER",
-                        "description": "任意。関係値がこの値を上回らないようにするための上限値。"
-                    },
-                    "days_to_decay": {
-                        "type": "NUMBER",
-                        "description": "任意。何日間更新がない場合に減衰を開始するかを指定します。この引数と'decay_value'はセットで使用します。"
-                    },
-                    "decay_value": {
-                        "type": "NUMBER",
-                        "description": "任意。'days_to_decay'を超えた後、1日あたりに変化する値。通常は負の数を指定します。例: -1"
-                    }
-                },
-                "required": ["action", "source_character"]
             }
           },
           {
@@ -2304,7 +2199,53 @@ window.functionDeclarations = [
                 },
                 "required": ["prompt", "source_images"]
             }
+        },
+        {
+            "name": "manage_character_memory",
+            "description": "ロールプレイングゲームや物語に登場するキャラクターの記憶や人格の一貫性を維持するための情報を管理します。キャラクターの記憶に変化があった場合（新しい出来事、感情の変化など）や、現在の状態を確認したい場合に使用します。",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "character_name": {
+                        "type": "STRING",
+                        "description": "操作対象のキャラクターの名前。"
+                    },
+                    "action": {
+                        "type": "STRING",
+                        "description": "実行する操作を選択します。'get': 記憶を取得, 'update': 記憶を更新, 'delete': 記憶を削除。"
+                    },
+                    "status": {
+                        "type": "STRING",
+                        "description": "キャラクターの生死や健康状態を更新する場合に指定します。例: '生存', '死亡', '負傷'"
+                    },
+                    "current_location": {
+                        "type": "STRING",
+                        "description": "キャラクターの現在地を更新する場合に指定します。例: '王都の広場'"
+                    },
+                    "summary": {
+                        "type": "STRING",
+                        "description": "キャラクターの性格や価値観など、人格の根幹をなす普遍的な設定を更新する場合に指定します。他者との具体的な思い出はここには含めません。"
+                    },
+                    "short_term_goal": {
+                        "type": "STRING",
+                        "description": "キャラクターの短期的な行動目標を更新する場合に指定します。例: '主人公にペンダントのお礼を言う'"
+                    },
+                    "relationship_target": {
+                        "type": "STRING",
+                        "description": "関係性を更新する相手のキャラクター名を指定します。'relationship_affinity'または'relationship_context'と合わせて使用します。"
+                    },
+                    "relationship_affinity": {
+                        "type": "NUMBER",
+                        "description": "相手への好感度(数値)を更新する場合に指定します。この値は上書きされます。"
+                    },
+                    "relationship_context": {
+                        "type": "STRING",
+                        "description": "相手との会話内容、思い出、感情の履歴などを追記する場合に指定します。重要：既に記載されている内容と重複しない、新しい出来事や感情の変化のみを箇条書きで簡潔に記述してください。"
+                    }
+                },
+                "required": ["character_name", "action"]
+            }
         }
-      ]
-  }
+    ]
+}
 ];
