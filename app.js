@@ -264,10 +264,21 @@ try {
         closeProfileDialogBtn: document.getElementById('close-profile-dialog-btn')
     };
 } catch (error) {
-    console.error("起動時エラー：アプリが更新されました。ページをリロードします。", error);
-    console.log("キャッシュをクリアしてページを強制的にリロードします...");
-    // ユーザーに通知する間もなくリロード
-    location.reload(true);
+    // ★修正点: sessionStorage を使ったリロード制御
+    console.error("起動時エラー:", error);
+    if (sessionStorage.getItem('reloadAttempted') !== 'true') {
+        console.log("初回エラーのため、強制リロードを試みます...");
+        sessionStorage.setItem('reloadAttempted', 'true');
+        location.reload(true);
+    } else {
+        console.error("リロード後もエラーが解決しなかったため、処理を停止します。");
+        sessionStorage.removeItem('reloadAttempted');
+        document.body.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">
+            <h1>アプリケーションの起動に失敗しました</h1>
+            <p>エラー: ${error.message}</p>
+            <p>自動リロードを試みましたが、問題が解決しませんでした。ブラウザのキャッシュを手動でクリアする必要があるかもしれません。</p>
+        </div>`;
+    }
 }
 
 // --- アプリ状態 ---
@@ -3392,9 +3403,14 @@ const appLogic = {
 
     // アプリ初期化
     async initializeApp() {
+        // 起動成功時にリロードフラグをクリアする
+        if (sessionStorage.getItem('reloadAttempted') === 'true') {
+            sessionStorage.removeItem('reloadAttempted');
+            console.log("リロード後の起動に成功しました。");
+        }
+
         if (sessionStorage.getItem('appUpdated') === 'true') {
             sessionStorage.removeItem('appUpdated');
-            // ダイアログが閉じるのを待ってから初期化を続行
             await uiUtils.showCustomAlert('アプリが新しいバージョンに更新されました。');
         }
         
@@ -3417,7 +3433,11 @@ const appLogic = {
         } else {
             console.error("Marked.jsライブラリが読み込まれていません！");
         }
-        elements.appVersionSpan.textContent = APP_VERSION;
+        
+        if (elements.appVersionSpan) {
+            elements.appVersionSpan.textContent = APP_VERSION;
+        }
+
         window.addEventListener('beforeinstallprompt', (event) => {
             event.preventDefault();
             console.log('beforeinstallpromptイベントを抑制しました。');
@@ -3564,6 +3584,7 @@ const appLogic = {
             this.applyFloatingPanelBehavior();
         }
     },
+
 
     // イベントリスナーを設定
     setupEventListeners() {
