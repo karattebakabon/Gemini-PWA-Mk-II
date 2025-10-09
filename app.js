@@ -30,7 +30,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.5";
+const APP_VERSION = "0.51";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
@@ -5182,6 +5182,11 @@ const appLogic = {
                 });
             }
 
+            // manage_image_assets の結果から imageId を収集するロジックを追加
+            if (msg.role === 'tool' && msg.name === 'manage_image_assets' && msg.response?.imageId) {
+                finalAggregatedMessage.imageIds.push(msg.response.imageId);
+            }
+
             if (msg._internal_ui_action) {
                 const actions = Array.isArray(msg._internal_ui_action) ? msg._internal_ui_action : [msg._internal_ui_action];
                 actions.forEach(action => {
@@ -5199,6 +5204,7 @@ const appLogic = {
 
         return finalAggregatedMessage;
     },
+
     
     async handleSend() {
         if (state.isSending) { return; }

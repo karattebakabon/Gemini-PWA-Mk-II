@@ -162,13 +162,11 @@ async function manage_image_assets({ action, asset_name, source_image_message_in
                 
                 const tempImageId = await window.appLogic.saveImageBlob(asset.blob);
 
+                // UIアクションを削除し、代わりにimageIdを返す
                 result = {
                     success: true,
                     message: `画像アセット「${asset_name}」を取得しました。`,
-                    _internal_ui_action: {
-                        type: "display_generated_images",
-                        imageIds: [tempImageId]
-                    }
+                    imageId: tempImageId
                 };
                 break;
             }
@@ -1692,7 +1690,7 @@ window.functionDeclarations = [
       "function_declarations": [
         {
             "name": "manage_image_assets",
-            "description": "ユーザーが提供した画像を、後から再利用できるように名前を付けてアプリ内に永続的に保存・管理します。キャラクターの立ち絵や背景など、繰り返し使用する画像を保存するのに使用します。",
+            "description": "ユーザーが提供した画像を、後から再利用できるように名前を付けてアプリ内に永続的に保存・管理します。キャラクターの立ち絵や背景など、繰り返し使用する画像を保存するのに使用します。'get'アクションで画像を取得した場合、モデルは応答テキスト内の画像を表示したい位置に `[IMAGE_HERE]` という目印を必ず配置してください。",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {

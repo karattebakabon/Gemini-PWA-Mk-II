@@ -624,6 +624,10 @@ AIがユーザーの意図を汲み取り、事前に用意された様々な「
 設定後、「明日の東京の天気をネット検索して調べて」のように指示し、情報が返ってくれば成功です。
 
 # 更新履歴
+### Version 0.51 (2024-10-09)
+*   **修正・改善**
+    *   `manage_image_assets`のgetアクションのロジックを改修し、戻り値にimageIdを含め、モデルが`[IMAGE_HERE]`のプレースホルダーで表示位置を変更出来るように変更。
+
 ### Version 0.5 メモリ機能&コンテキスト圧縮機能 (2024-09-17)
 *   **機能追加**
     *   保存されている画像アセットのインポート/エクスポート機能を実装。
@@ -720,4 +724,9 @@ AIがユーザーの意図を汲み取り、事前に用意された様々な「
 ## Dependencies
 This project uses the following third-party libraries:
 
+*   **Index.html:** [MIT License](https://github.com/ona-oni/geminipwa/blob/main/LICENSE) - Used for Main file.
 *   **Marked.js:** [MIT License](https://github.com/markedjs/marked/blob/master/LICENSE.md) - Used for rendering Markdown.
+*   **Prism.js:** [MIT License](https://github.com/PrismJS/prism/blob/master/LICENSE) - Used for syntax highlighting.
+*   **JSZip:** [MIT License](https://github.com/Stuk/jszip/blob/main/LICENSE.markdown) - Used for creating and reading Zip archives for the asset import/export feature.
+*   **Google AI JavaScript SDK (@google/genai):** [Apache License 2.0](https://github.com/google/generative-ai-js/blob/main/LICENSE) - Used for communicating with the Google Gemini API.
+*   **Google Fonts (Roboto & Material Symbols):** [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) - Used for the application's font and icons.
