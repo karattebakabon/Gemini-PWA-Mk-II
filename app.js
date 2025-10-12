@@ -30,7 +30,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "0.51";
+const APP_VERSION = "0.52";
 const SWIPE_THRESHOLD = 50; // スワイプ判定の閾値 (px)
 const ZOOM_THRESHOLD = 1.01; // ズーム状態と判定するスケールの閾値 (誤差考慮)
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 最大ファイルサイズ (例: 10MB)
@@ -264,7 +264,7 @@ try {
         closeProfileDialogBtn: document.getElementById('close-profile-dialog-btn')
     };
 } catch (error) {
-    // ★修正点: sessionStorage を使ったリロード制御
+    // sessionStorage を使ったリロード制御
     console.error("起動時エラー:", error);
     if (sessionStorage.getItem('reloadAttempted') !== 'true') {
         console.log("初回エラーのため、強制リロードを試みます...");
@@ -1128,7 +1128,7 @@ const uiUtils = {
         const processedGroupIds = new Set();
 
         state.currentMessages.forEach((msg) => {
-            if (msg.isHidden) return;
+            if (msg.isHidden) return; // ★ isHiddenフラグを持つメッセージは表示しない
             if (msg.isCascaded && msg.siblingGroupId) {
                 if (!processedGroupIds.has(msg.siblingGroupId)) {
                     const siblings = state.currentMessages.filter(m => m.siblingGroupId === msg.siblingGroupId && !m.isHidden);
@@ -1143,6 +1143,7 @@ const uiUtils = {
             }
         });
 
+        // 要約マーカー表示ロジック
         const summaryEndIndex = state.currentSummarizedContext?.summaryRange?.end;
         let markerInserted = false;
 
@@ -1150,6 +1151,7 @@ const uiUtils = {
             const index = state.currentMessages.indexOf(msg);
             if (index === -1 || msg.role === 'tool') return;
             
+            // メッセージのインデックスが要約範囲の終端と一致したらマーカーを挿入
             if (!markerInserted && summaryEndIndex !== undefined && index >= summaryEndIndex) {
                 const markerDiv = document.createElement('div');
                 markerDiv.className = 'summary-marker';
@@ -1179,6 +1181,7 @@ const uiUtils = {
             }
         });
         
+        // ループ後にマーカーが挿入されなかった場合（＝全履歴が要約対象だった場合）の処理
         if (!markerInserted && summaryEndIndex !== undefined && state.currentMessages.length === summaryEndIndex) {
             const markerDiv = document.createElement('div');
             markerDiv.className = 'summary-marker';
@@ -1209,6 +1212,7 @@ const uiUtils = {
         const renderEndTime = performance.now();
         console.log(`[PERF_DEBUG] renderChatMessages 完了 (合計所要時間: ${renderEndTime - renderStartTime}ms)`);
     },
+
 
 
 
@@ -3055,9 +3059,8 @@ const appLogic = {
             await uiUtils.showCustomAlert("更新対象のプロファイルが選択されていません。");
             return;
         }
-        
+
         const updatedProfile = { ...state.activeProfile };
-        updatedProfile.settings = this.getCurrentUiSettings();
 
         try {
             await dbUtils.updateProfile(updatedProfile);
@@ -3066,14 +3069,16 @@ const appLogic = {
             if (index !== -1) {
                 state.profiles[index] = updatedProfile;
             }
-            state.activeProfile = updatedProfile; // アクティブなプロファイルも更新
+            // activeProfile は既に更新されているので再代入は不要
+
+            this.markAsDirtyAndSchedulePush(true);
             
             console.log(`[Profile] プロファイル「${updatedProfile.name}」を更新しました。`);
             this.applyActiveProfile(); // UIに再適用
             uiUtils.updateProfileSwitcherUI();
         } catch (error) {
             console.error("[Profile] プロファイルの更新に失敗しました:", error);
-            await uiUtils.showCustomAlert(`プロファイルの更新に失敗しました: ${error}`);
+            await uiUtils.showCustomAlert(`プロファイルの更新に失敗しました: ${error.message}`);
         }
     },
     
@@ -3159,10 +3164,19 @@ const appLogic = {
 
     getCurrentUiSettings() {
         const settings = {};
-        const stringKeys = ['apiKey', 'modelName', 'systemPrompt', 'dummyUser', 'dummyModel', 'additionalModels', 'historySortOrder', 'fontFamily', 'proofreadingModelName', 'proofreadingSystemInstruction', 'googleSearchApiKey', 'googleSearchEngineId', 'headerColor', 'thoughtTranslationModel', 'summarySystemPrompt'];
-        const numberKeys = ['temperature', 'maxTokens', 'topK', 'topP', 'thinkingBudget', 'maxRetries', 'fixedRetryDelaySeconds', 'maxBackoffDelaySeconds', 'overlayOpacity', 'messageOpacity'];
-        const booleanKeys = ['enterToSend', 'darkMode', 'hideSystemPromptInChat', 'geminiEnableGrounding', 'geminiEnableFunctionCalling', 'enableSwipeNavigation', 'enableProofreading', 'enableAutoRetry', 'useFixedRetryDelay', 'concatDummyModel', 'includeThoughts', 'enableThoughtTranslation', 'applyDummyToProofread', 'applyDummyToTranslate', 'allowPromptUiChanges', 'forceFunctionCalling', 'autoScroll', 'enableWideMode', 'enableSummaryButton'];
+        const stringKeys = ['apiKey', 'modelName', 'dummyUser', 'dummyModel', 'additionalModels', 'historySortOrder', 'fontFamily', 'proofreadingModelName', 'proofreadingSystemInstruction', 'googleSearchApiKey', 'googleSearchEngineId', 'headerColor', 'thoughtTranslationModel', 'summarySystemPrompt'];
+        const numberKeys = ['temperature', 'maxTokens', 'topK', 'topP', 'thinkingBudget', 'maxRetries', 'maxBackoffDelaySeconds', 'overlayOpacity', 'messageOpacity'];
+        const booleanKeys = ['enterToSend', 'darkMode', 'geminiEnableGrounding', 'geminiEnableFunctionCalling', 'enableSwipeNavigation', 'enableProofreading', 'enableAutoRetry', 'useFixedRetryDelay', 'concatDummyModel', 'includeThoughts', 'enableThoughtTranslation', 'applyDummyToProofread', 'applyDummyToTranslate', 'forceFunctionCalling', 'autoScroll', 'enableWideMode', 'enableSummaryButton'];
         
+        settings.systemPrompt = elements.systemPromptDefaultTextarea.value.trim();
+        settings.fixedRetryDelaySeconds = parseFloat(elements.fixedRetryDelayInput.value) || null;
+        settings.hideSystemPromptInChat = elements.hideSystemPromptToggle.checked;
+        settings.floatingPanelBehavior = elements.floatingPanelBehaviorSelect.value;
+        const allowUiChangesEl = document.getElementById('allow-prompt-ui-changes');
+        if (allowUiChangesEl) {
+            settings.allowPromptUiChanges = allowUiChangesEl.checked;
+        }
+
         stringKeys.forEach(key => {
             const element = elements[key + 'Input'] || elements[key + 'Select'] || elements[key + 'Textarea'];
             if (element) settings[key] = element.value.trim();
@@ -3192,6 +3206,7 @@ const appLogic = {
     },
 
 
+
     fileToBase64(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -3209,8 +3224,36 @@ const appLogic = {
     },
 
     _prepareApiHistory(baseMessages) {
-        console.log("[API Prep] 通常の履歴をAPIフォーマットに変換します。");
-        const messagesForApi = [...baseMessages];
+        console.log("[API Prep] 履歴をAPIフォーマットに変換します。");
+
+        let messagesForApi;
+
+        // 要約コンテキストが存在する場合、API送信用の履歴を動的に構築する
+        if (state.currentSummarizedContext && state.currentSummarizedContext.summaryText) {
+            console.log("[API Prep] 要約コンテキストを検出。API履歴を圧縮します。");
+            const { summaryText, summaryRange } = state.currentSummarizedContext;
+            const headCount = 5;
+            const tailCount = 15;
+
+            const headMessages = baseMessages.slice(0, headCount);
+            const tailMessages = baseMessages.slice(Math.max(headCount, baseMessages.length - tailCount));
+            
+            const summaryMessage = {
+                role: 'user',
+                content: `【これまでの会話の要約】\n${summaryText}`,
+                timestamp: Date.now(),
+                isHidden: true, // UIには表示されない内部的なメッセージ
+                attachments: []
+            };
+            
+            // head, summary, tail を結合してAPI用の履歴を作成
+            messagesForApi = [...headMessages, summaryMessage, ...tailMessages];
+            console.log(`[API Prep] 履歴を圧縮しました: Head(${headMessages.length}) + Summary(1) + Tail(${tailMessages.length}) = ${messagesForApi.length}件`);
+
+        } else {
+            // 通常の履歴
+            messagesForApi = [...baseMessages];
+        }
 
         // ダミープロンプトの追加処理は共通
         if (state.settings.dummyUser) {
@@ -3220,27 +3263,21 @@ const appLogic = {
             messagesForApi.push({ role: 'model', content: state.settings.dummyModel, attachments: [] });
         }
         
-        // --- ここにデバッグログを再挿入します ---
         console.log('--- [DEBUG] API送信前の履歴チェック ---');
         console.log(`APIに送信されるメッセージ件数: ${messagesForApi.length}件`);
-        // ------------------------------------
 
         return messagesForApi.map(msg => {
+            // 添付ファイルやFunction Callのpartsを生成するロジックは変更なし
             const parts = [];
-
-            // ユーザーメッセージに添付ファイル情報を含める処理を簡略化
             let contentText = msg.content || '';
             if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
                 const fileNames = msg.attachments.map(att => att.name).join(', ');
                 const attachmentText = `\n\n[添付ファイル: ${fileNames}]`;
-                // コンテンツが空でも添付ファイル情報だけは含めるように修正
                 contentText = (contentText.trim() ? contentText : '') + attachmentText;
             }
-
-            if (contentText.trim() !== '') {
+            if (contentText.trim() !== '' || msg.isHidden) { // isHiddenのメッセージもcontentが空でもpartsに含める
                 parts.push({ text: contentText });
             }
-
             if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
                 msg.attachments.forEach(att => parts.push({ inlineData: { mimeType: att.mimeType, data: att.base64Data } }));
             }
@@ -3260,6 +3297,7 @@ const appLogic = {
             return { role: msg.role === 'tool' ? 'tool' : (msg.role === 'model' ? 'model' : 'user'), parts };
         }).filter(c => c.parts.length > 0);
     },
+
 
 
 
@@ -3695,11 +3733,15 @@ const appLogic = {
                         case 'range':
                             value = parseFloat(element.value) / 100;
                             break;
-                        case 'number':
-                        case 'select-one':
-                            value = parseFloat(element.value);
-                            if (isNaN(value)) value = element.value;
-                            break;
+                            case 'number':
+                            case 'select-one':
+                                const rawValue = element.value;
+                                value = parseFloat(rawValue);
+                                if (isNaN(value)) {
+                                    // 空文字列の場合はnullに、それ以外の文字列（selectなど）はそのまま
+                                    value = rawValue === '' ? null : rawValue;
+                                }
+                                break;
                         default:
                             value = element.value;
                             break;
@@ -3766,7 +3808,10 @@ const appLogic = {
             enableWideMode: { element: elements.enableWideModeToggle, event: 'change', onUpdate: () => this.applyWideMode() },
             enableMemory: { element: elements.enableMemoryToggle, event: 'change', onUpdate: (value) => this.toggleMemoryOptions(value) },
             memoryAutoSaveInterval: { element: elements.memoryAutoSaveIntervalSelect, event: 'change' },
-            headerAutoHide: { element: elements.headerAutoHideToggle, event: 'change', onUpdate: (value) => document.body.classList.toggle('header-auto-hide', value) }
+            headerAutoHide: { element: elements.headerAutoHideToggle, event: 'change', onUpdate: (value) => document.body.classList.toggle('header-auto-hide', value) },
+            summarySystemPrompt: { element: elements.summarySystemPromptTextarea, event: 'input' },
+            enableSummaryButton: { element: elements.enableSummaryButtonToggle, event: 'change', onUpdate: () => this.toggleSummaryButtonVisibility() },
+            floatingPanelBehavior: { element: elements.floatingPanelBehaviorSelect, event: 'change', onUpdate: () => this.applyFloatingPanelBehavior() }
         };
     
         for (const key in settingsMap) {
@@ -4080,18 +4125,10 @@ const appLogic = {
 
         // --- History Summary ---
         elements.summarizeHistoryBtn.addEventListener('click', () => this.startSummaryProcess());
-        elements.summarySystemPromptTextarea.addEventListener('input', () => {
-            state.settings.summarySystemPrompt = elements.summarySystemPromptTextarea.value;
-            this.updateCurrentProfile(); // 設定変更を即時保存
-        });
-        elements.enableSummaryButtonToggle.addEventListener('change', () => {
-            state.settings.enableSummaryButton = elements.enableSummaryButtonToggle.checked;
-            this.updateCurrentProfile();
-            this.toggleSummaryButtonVisibility();
-        });
         elements.summaryCancelBtn.addEventListener('click', () => elements.summaryDialog.close('cancel'));
         elements.summaryRegenerateBtn.addEventListener('click', () => this.regenerateSummary());
         elements.summaryConfirmBtn.addEventListener('click', () => this.confirmSummary());
+
 
         // --- Floating Action Panel & Scroll ---
         const mainContent = elements.chatScreen.querySelector('.main-content');
@@ -4664,8 +4701,6 @@ const appLogic = {
         reader.readAsText(file);
     },
 
-
-
     // チャットをテキストファイルとしてエクスポート
     async exportChat(chatId, chatTitle) {
         const confirmed = await uiUtils.showCustomConfirm(`チャット「${chatTitle || 'この履歴'}」をテキスト出力しますか？`);
@@ -4696,12 +4731,28 @@ const appLogic = {
     
             let exportText = '';
             const imageDataBlock = {};
+            const attachmentDataBlock = {}; // 添付ファイルデータ用オブジェクトを追加
             const allImageIds = new Set();
 
             if (chatToExport.messages) {
+                // 先に全メッセージを走査して、必要な画像IDと添付ファイルIDを収集
                 chatToExport.messages.forEach(msg => {
                     if (msg.imageIds && msg.imageIds.length > 0) {
                         msg.imageIds.forEach(id => allImageIds.add(id));
+                    }
+                    // 添付ファイルにもユニークIDを割り振り、データ収集の準備
+                    if (msg.attachments && msg.attachments.length > 0) {
+                        msg.attachments.forEach(att => {
+                            if (att.base64Data) {
+                                const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                                att.attachmentId = attachmentId; // 一時的にIDを付与
+                                attachmentDataBlock[attachmentId] = {
+                                    name: att.name,
+                                    mimeType: att.mimeType,
+                                    data: att.base64Data
+                                };
+                            }
+                        });
                     }
                 });
             }
@@ -4764,9 +4815,12 @@ const appLogic = {
                                 attributes += ` imageIds="${msg.imageIds.join(',')}"`;
                             }
                         }
+                        // ファイル名ではなく、割り振ったattachmentIdを記録する
                         if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
-                            const fileNames = msg.attachments.map(a => a.name).join(';');
-                            attributes += ` attachments="${fileNames.replace(/"/g, '&quot;')}"`;
+                            const attachmentIds = msg.attachments.map(a => a.attachmentId).filter(Boolean).join(',');
+                            if (attachmentIds) {
+                                attributes += ` attachments="${attachmentIds}"`;
+                            }
                         }
                         exportText += `<|#|${msg.role}|#|${attributes.trim()}>\n${msg.content}\n<|#|/${msg.role}|#|>\n\n`;
                     }
@@ -4774,7 +4828,12 @@ const appLogic = {
             }
 
             if (Object.keys(imageDataBlock).length > 0) {
-                exportText += `<|#|imagedata|#|>\n${JSON.stringify(imageDataBlock, null, 2)}\n<|#|/imagedata|#|>\n`;
+                exportText += `<|#|imagedata|#|>\n${JSON.stringify(imageDataBlock, null, 2)}\n<|#|/imagedata|#|>\n\n`;
+            }
+
+            // 新しくattachmentdataブロックを書き出す
+            if (Object.keys(attachmentDataBlock).length > 0) {
+                exportText += `<|#|attachmentdata|#|>\n${JSON.stringify(attachmentDataBlock, null, 2)}\n<|#|/attachmentdata|#|>\n`;
             }
     
             uiUtils.updateProgressMessage('ファイルをダウンロード中...');
@@ -4795,11 +4854,6 @@ const appLogic = {
             uiUtils.hideProgressDialog();
         }
     },
-
-
-
-
-
 
     // チャット削除の確認と実行 (メッセージペア全体)
     async confirmDeleteChat(id, title) {
@@ -5443,7 +5497,6 @@ const appLogic = {
         reader.readAsText(file);
     },
 
-
     // インポートされたテキストをパースする
     parseImportedHistory(text) {
         const messages = [];
@@ -5451,44 +5504,37 @@ const appLogic = {
         let persistentMemory = {};
         let summarizedContext = null;
         const imageData = {};
+        const attachmentData = {}; // 添付ファイルデータ保持用オブジェクト
 
-        // メタデータブロック
-        const metadataRegex = /<\|#\|metadata\|#\|>([\s\S]*?)<\|#\|\/metadata\|#\|>\s*/;
-        const metadataMatch = text.match(metadataRegex);
         let remainingText = text;
-        if (metadataMatch) {
-            try {
-                persistentMemory = JSON.parse(metadataMatch[1].trim());
-            } catch (e) {
-                console.error("インポートされたmetadataのJSONパースに失敗:", e);
-                persistentMemory = {};
-            }
-            remainingText = remainingText.replace(metadataRegex, '');
-        }
 
-        // 要約データブロックを先に抽出
-        const summaryRegex = /<\|#\|summary\|#\|>([\s\S]*?)<\|#\|\/summary\|#\|>\s*/;
-        const summaryMatch = remainingText.match(summaryRegex);
-        if (summaryMatch) {
+        // 正規表現を更新し、attachmentdataも捕捉できるようにする
+        const dataBlockRegex = /<\|#\|(metadata|summary|imagedata|attachmentdata)\|#\|>([\s\S]*?)<\|#\|\/\1\|#\|>\s*/g;
+        let dataMatch;
+        while ((dataMatch = dataBlockRegex.exec(text)) !== null) {
+            const blockType = dataMatch[1];
+            const blockContent = dataMatch[2].trim();
             try {
-                summarizedContext = JSON.parse(summaryMatch[1].trim());
+                const jsonData = JSON.parse(blockContent);
+                switch (blockType) {
+                    case 'metadata':
+                        persistentMemory = jsonData;
+                        break;
+                    case 'summary':
+                        summarizedContext = jsonData;
+                        break;
+                    case 'imagedata':
+                        Object.assign(imageData, jsonData);
+                        break;
+                    case 'attachmentdata':
+                        Object.assign(attachmentData, jsonData);
+                        break;
+                }
             } catch (e) {
-                console.error("インポートされたsummaryのJSONパースに失敗:", e);
-                summarizedContext = null;
+                console.error(`インポートされた ${blockType} のJSONパースに失敗:`, e);
             }
-            remainingText = remainingText.replace(summaryRegex, '');
-        }
-
-        const imageDataRegex = /<\|#\|imagedata\|#\|>([\s\S]*?)<\|#\|\/imagedata\|#\|>\s*/;
-        const imageDataMatch = remainingText.match(imageDataRegex);
-        if (imageDataMatch) {
-            try {
-                const imageDataJson = imageDataMatch[1].trim();
-                Object.assign(imageData, JSON.parse(imageDataJson));
-            } catch (e) {
-                console.error("インポートされたimagedataのJSONパースに失敗:", e);
-            }
-            remainingText = remainingText.replace(imageDataRegex, '');
+            // パースしたブロックを元のテキストから削除
+            remainingText = remainingText.replace(dataMatch[0], '');
         }
     
         const blockRegex = /<\|#\|(system|user|model)\|#\|([^>]*)>([\s\S]*?)<\|#\|\/\1\|#\|>/g;
@@ -5516,9 +5562,20 @@ const appLogic = {
                         const key = attrMatch[1];
                         const value = attrMatch[2].replace(/&quot;/g, '"');
                         if (key === 'attachments') {
-                            messageData.attachments = value.split(';').map(name => ({
-                                name: name, mimeType: 'unknown/unknown', base64Data: ''
-                            }));
+                            // attachmentIdを元に、保持しておいたデータから完全なオブジェクトを復元
+                            const attachmentIds = value.split(',');
+                            messageData.attachments = attachmentIds.map(id => {
+                                const data = attachmentData[id];
+                                if (data) {
+                                    return {
+                                        name: data.name,
+                                        mimeType: data.mimeType,
+                                        base64Data: data.data,
+                                        // fileオブジェクトはインポート時には復元しない
+                                    };
+                                }
+                                return null; // データが見つからない場合はnull
+                            }).filter(Boolean); // nullを除外
                         } else if (key === 'imageIds') {
                             messageData.imageIds = value.split(',');
                         }
@@ -5531,11 +5588,9 @@ const appLogic = {
         }
         console.log(`インポートテキストから ${messages.length} 件のメッセージとシステムプロンプト(${systemPrompt ? 'あり' : 'なし'})、要約データ(${summarizedContext ? 'あり' : 'なし'})をパースしました。`);
 
+        // 返り値にimageDataを追加
         return { messages, systemPrompt, persistentMemory, summarizedContext, imageData };
     },
-
-
-    // -------------------------------
 
     // --- 背景画像ハンドラ ---
     async handleBackgroundImageUpload(file) {
@@ -5624,51 +5679,16 @@ const appLogic = {
 
     // 全データ削除の確認と実行
     async confirmClearAllData() {
-        const confirmed = await uiUtils.showCustomConfirm("本当にすべてのデータ（チャット履歴と設定）を削除しますか？この操作は元に戻せません。");
+        const confirmed = await uiUtils.showCustomConfirm("本当にすべてのデータ（チャット履歴、プロファイル、アセット、設定）を削除しますか？この操作は元に戻せません。");
         if (confirmed) {
             try {
-                uiUtils.revokeExistingObjectUrl(); // 背景画像のURLを破棄
-                await dbUtils.clearAllData(); // DBの全データをクリア
+                uiUtils.revokeExistingObjectUrl();
+                await dbUtils.clearAllData();
                 await uiUtils.showCustomAlert("すべてのデータが削除されました。アプリをリセットします。");
 
-                // stateを完全に初期デフォルト状態にリセット
-                state.currentChatId = null;
-                state.currentMessages = [];
-                state.currentSystemPrompt = ''; // システムプロンプトもリセット
-                state.pendingAttachments = [];
-                state.settings = { // 初期デフォルト値に戻す
-                    apiKey: '',
-                    modelName: DEFAULT_MODEL,
-                    streamingOutput: true,
-                    streamingSpeed: DEFAULT_STREAMING_SPEED,
-                    systemPrompt: '', // デフォルトSPもリセット
-                    temperature: null,
-                    maxTokens: null,
-                    topK: null,
-                    topP: null,
-                    thinkingBudget: null,
-                    dummyUser: '',
-                    dummyModel: '',
-                    concatDummyModel: false,
-                    additionalModels: '',
-                    pseudoStreaming: false,
-                    enterToSend: true,
-                    historySortOrder: 'updatedAt',
-                    // ダークモードはOS設定にフォールバック
-                    darkMode: window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
-                    backgroundImageBlob: null,
-                    fontFamily: '', // フォントもリセット
-                    hideSystemPromptInChat: false, // SP非表示もリセット
-                    enableSwipeNavigation: true, // スワイプナビゲーションのデフォルト値
-                };
-                state.backgroundImageUrl = null;
+                // ページをリロードして、完全にクリーンな状態で再起動するのが最も確実
+                window.location.reload();
 
-                // リセットされた状態をUIに適用
-                document.documentElement.style.setProperty('--chat-background-image', 'none'); // 背景スタイルリセット
-                uiUtils.applySettingsToUI(); // 設定UIをリセット (ダークモード、背景UI、フォント、SP表示含む)
-                uiUtils.updateAttachmentBadgeVisibility(); // バッジ状態更新
-                this.startNewChat(); // 新規チャット状態にする (履歴状態もリセットされる)
-                uiUtils.showScreen('chat', true); // popstate経由ではないが履歴操作はstartNewChatに任せる
             } catch (error) {
                 await uiUtils.showCustomAlert(`データ削除中にエラーが発生しました: ${error}`);
             }
@@ -8061,49 +8081,37 @@ const appLogic = {
             return;
         }
 
+        const start = parseInt(elements.summaryDialog.dataset.summaryRangeStart, 10);
         const end = parseInt(elements.summaryDialog.dataset.summaryRangeEnd, 10);
 
         try {
-            // 1. 既存の要約テキストを取得（あれば）
+            // 既存の要約と新しい要約を結合する
             const existingSummary = state.currentSummarizedContext ? state.currentSummarizedContext.summaryText : "";
             const newSummaryText = existingSummary ? `${existingSummary}\n\n${summaryText}` : summaryText;
 
-            // 2. 新しい履歴を構築
-            const headMessages = state.currentMessages.slice(0, 5);
-            // tailの開始位置を計算。headと重複せず、かつ配列の範囲を超えないようにする
-            const tailStart = Math.max(5, end - 15);
-            const tailMessages = state.currentMessages.slice(tailStart, end);
-            
-            const summaryMessage = {
-                role: 'user',
-                content: `【これまでのあらすじ】\n${newSummaryText}`,
-                timestamp: Date.now(),
-                isHidden: true // このメッセージはUI上には表示しない
+            // state.currentMessagesを上書きせず、summarizedContextオブジェクトを更新する
+            state.currentSummarizedContext = {
+                summaryText: newSummaryText,
+                summaryRange: { start: 0, end: end }, // startは常に0、endを更新
+                summarizedAt: Date.now()
             };
 
-            // 3. 現在のメッセージ配列を、圧縮された新しい配列で完全に置き換える
-            const originalCount = state.currentMessages.length;
-            const newMessages = [...headMessages, summaryMessage, ...tailMessages];
-            state.currentMessages = newMessages;
-
-            // 4. summarizedContext を確実に null にリセット
-            state.currentSummarizedContext = null;
-
-            // 5. 変更をDBに保存
+            // 変更されたsummarizedContextを含むチャット全体を保存する
             await dbUtils.saveChat();
 
             elements.summaryDialog.close('confirm');
             
-            // 6. UIを再描画
+            // UIを再描画してサマリーマーカーを表示させる
             uiUtils.renderChatMessages();
             
-            await uiUtils.showCustomAlert(`履歴を圧縮しました。\nメッセージ件数が ${originalCount}件 から ${newMessages.length}件 になりました。`);
+            await uiUtils.showCustomAlert(`履歴の要約を保存しました。\n次回以降、APIには要約された内容が送信されます。`);
 
         } catch (error) {
             console.error("要約の保存エラー:", error);
             await uiUtils.showCustomAlert(`要約の保存に失敗しました: ${error.message}`);
         }
     },
+
 
 
 
