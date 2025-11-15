@@ -9,14 +9,15 @@
     <!-- RobotoフォントとMaterial Symbols を読み込む -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0" />
     <!-- CSSファイルを外部から読み込む -->
-    <link rel="stylesheet" href="style.css?v=0.52">
+    <link rel="stylesheet" href="style.css?v=1.0">
     <link rel="stylesheet" href="prism.css" />
     <script src="marked.js" defer></script>
-    <script src="function-calling.js?v=0.52" defer></script>
-    <script src="app.js?v=0.52" defer></script>
+    <script src="function-calling.js?v=1.0" defer></script>
+    <script src="dropbox.js" defer></script>
+    <script src="app.js?v=1.0" defer></script>
 </head>
 <body>
     <div class="app-container">
@@ -27,13 +28,11 @@
             <div id="header-trigger-area"></div>
             <header class="app-header">
                 <button id="goto-history-btn" class="header-button" title="履歴一覧へ"><span class="material-symbols-outlined">menu</span></button>
+                <span id="sync-status-header-icon" class="material-symbols-outlined sync-status-header-icon" title="同期ステータス"></span>
                 <h1 id="chat-title">新規チャット</h1>                
                 <button id="new-chat-btn" class="new-chat-button" title="新規チャットを開始"><span class="material-symbols-outlined">add</span></button>
                 <button id="goto-settings-btn" class="header-button" title="設定へ"><span class="material-symbols-outlined">settings</span></button>
             </header>
-
-
-
 
             <main class="main-content">
                 <!-- システムプロンプト表示/編集エリア -->
@@ -60,6 +59,9 @@
             <div id="floating-action-panel" class="floating-action-panel">
                 <button id="summarize-history-btn" class="floating-action-button" title="履歴を要約" disabled>
                     <span class="material-symbols-outlined">article_shortcut</span>
+                </button>
+                <button id="debug-log-btn" class="floating-action-button hidden" title="デバッグログを表示">
+                    <span class="material-symbols-outlined">bug_report</span>
                 </button>
                 <button id="memory-toggle-btn" class="floating-action-button hidden" title="このチャットの長期記憶を切り替え">
                     <span class="material-symbols-outlined">auto_stories</span>
@@ -102,6 +104,7 @@
             <header class="app-header">
                 <button id="back-to-chat-from-history" class="header-button" title="チャットへ戻る"><span class="material-symbols-outlined">arrow_forward_ios</span></button>
                 <h1 id="history-title">履歴一覧</h1>
+                <button id="delete-old-chats-btn" class="header-button header-delete-button" title="古い履歴を一括削除" disabled><span class="material-symbols-outlined">delete_sweep</span></button>
                 <button id="import-history-btn" class="header-save-button" title="履歴をインポート"><span class="material-symbols-outlined">download</span></button>
                 <input type="file" id="import-history-input" accept=".txt,text/plain" class="hidden"> <!-- インポート用ファイル入力 -->
             </header>
@@ -111,6 +114,11 @@
                     <li class="js-history-item-template history-item">
                         <div class="history-item-details">
                             <span class="history-item-title"></span>
+                            <div class="history-item-stats">
+                                <span class="stat-item js-stat-tokens" title="合計トークン数"><span class="material-symbols-outlined">token</span>-</span>
+                                <span class="stat-item js-stat-assets" title="合計アセット数"><span class="material-symbols-outlined">perm_media</span>-</span>
+                                <span class="stat-item js-stat-size" title="合計アセット容量"><span class="material-symbols-outlined">database</span>-</span>
+                            </div>
                         </div>
                         <div class="history-item-bottom-row">
                             <div class="history-item-dates">
@@ -194,7 +202,6 @@
                     <div id="memory-options-container" class="hidden">
                         <label for="memory-auto-save-interval">自動学習の間隔:</label>
                         <select id="memory-auto-save-interval">
-                            <option value="5">5メッセージごと (デバッグ用)</option>
                             <option value="10">10メッセージごと</option>
                             <option value="20">20メッセージごと</option>
                             <option value="30">30メッセージごと</option>
@@ -211,8 +218,21 @@
 
                 <div class="settings-group">
                     <h3>基本設定</h3>
-                    <label for="api-key">Gemini APIキー:</label>
-                    <input type="password" autocomplete="new-password" id="api-key" placeholder="APIキーを入力" aria-label="Gemini APIキー">
+                    <label for="api-provider">APIプロバイダー:</label>
+                    <select id="api-provider" aria-label="APIプロバイダー">
+                        <option value="gemini">Gemini</option>
+                        <option value="zai">Z.ai</option>
+                    </select>
+
+                    <div id="gemini-api-key-container">
+                        <label for="api-key">Gemini APIキー:</label>
+                        <input type="password" autocomplete="new-password" id="api-key" placeholder="APIキーを入力" aria-label="Gemini APIキー">
+                    </div>
+
+                    <div id="zai-api-key-container" class="hidden">
+                        <label for="zai-api-key">Z.ai APIキー:</label>
+                        <input type="password" autocomplete="new-password" id="zai-api-key" placeholder="Z.ai APIキーを入力" aria-label="Z.ai APIキー">
+                    </div>
 
                     <label for="model-name">モデル名:</label>
                     <select id="model-name" aria-label="モデル名">
@@ -222,11 +242,19 @@
                         <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                         <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
                         <optgroup label="プレビュー版">
+                            <option value="gemini-2.5-flash-preview-09-2025">gemini-2.5-flash-preview-09-2025</option>
+                            <option value="gemini-2.5-flash-lite-preview-09-2025">gemini-2.5-flash-lite-preview-09-2025</option>
                             <option value="gemini-2.5-flash-image-preview">gemini-2.5-flash-image-preview (Nano Banana)</option>
                         </optgroup>
                         <optgroup label="ユーザー指定" id="user-defined-models-group">
                         </optgroup>
                     </select>
+                    <div id="api-usage-container" class="api-usage-container hidden">
+                        <p id="api-usage-text" class="api-usage-text"></p>
+                        <button id="reset-api-count-btn" class="settings-reset-button" type="button">カウントをリセット</button>
+                    </div>
+                    <p id="model-warning-message" class="hidden model-warning">
+
                     <p id="model-warning-message" class="hidden model-warning">
                         ※Nano Bananaはテスト中のため不具合が発生する可能性があります。<br>
                         ※サポート外の機能: システムプロンプト, Function Calling, Web検索, 思考プロセス
@@ -260,7 +288,6 @@
                     <details style="margin-top: 15px;">
                         <summary style="cursor: pointer; font-weight: normal; font-size: 14px; color: var(--text-link); margin-bottom: 10px;">その他パラメータ</summary>
                         <div class="param-grid">
-                            <!-- Presence PenaltyとFrequency Penaltyの入力欄を削除 -->
                         </div>
                         <p style="height:16px;"></p>
                         <div class="param-grid">
@@ -351,6 +378,73 @@
                         </div>
                     </div>
                 </div>
+                
+                <div class="settings-group" id="data-sync-group">
+                    <div class="sync-header">
+                        <h3>
+                            データ同期
+                        </h3>
+                    </div>
+                
+                    <!-- 連携前の表示 -->
+                    <div id="dropbox-auth-state">
+                        <p class="sync-description">
+                            Dropboxアカウントと連携して、異なるブラウザ間でPWAの全データを安全に同期します。<br>
+                            初回は複数環境で残したいデータを1つのブラウザーにまとめてから連携することをおすすめします。<br>
+                            初回連携時は全データをクラウドにアップロードする処理が実行されます。<a href="https://github.com/kinkan04/Gemini-PWA-Mk-II" target="_blank">本機能の詳細はこちら</a>
+                        </p>
+                        <button id="dropbox-auth-btn" class="sync-primary-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 256 256" fill="currentColor"><path d="M128,32,69.6,71.2,10.4,110.4,69.6,149.6,128,188.8l58.4-39.2,59.2-39.2L186.4,71.2ZM128,51.5l38.7,26.1-38.7,26.1-38.7-26.1Zm0,153.3,58.4-39.2,0-52.2-58.4,39.2Zm-58.4-91.4,58.4,39.2,0,52.2-58.4-39.2Z"/></svg>
+                            <span>Dropboxと連携する</span>
+                        </button>
+                    </div>
+                
+                    <!-- 連携後の表示 -->
+                    <div id="dropbox-connected-state" class="hidden">
+                        <p class="sync-description">
+                            <span id="sync-status-settings-icon" class="sync-status-header-icon" title="同期ステータス"></span>
+                            <strong id="dropbox-user-name"></strong> のアカウントと連携済みです。
+                            <span id="sync-progress-text" class="sync-progress-text"></span>
+                        </p>
+
+                        <p id="last-sync-time-display" class="last-sync-time-display"></p>
+
+                        <div class="sync-setting-row">
+                            <label for="dropbox-sync-frequency">セッションの自動同期のタイミング:</label>
+                            <select id="dropbox-sync-frequency">
+                                <option value="instant">メッセージ送信後すぐ (即時)</option>
+                                <option value="5">5メッセージごと</option>
+                                <option value="10">10メッセージごと</option>
+                                <option value="30">30メッセージごと</option>
+                                <option value="manual">手動同期のみ</option>
+                            </select>
+                        </div>
+
+                        <div id="sync-error-display" class="sync-error-display hidden">
+                            <div class="sync-error-header">
+                                <span class="material-symbols-outlined">error</span>
+                                <span>同期エラー</span>
+                            </div>
+                            <p id="sync-error-message" class="sync-error-message"></p>
+                            <span id="sync-error-timestamp" class="sync-error-timestamp"></span>
+                            <button id="clear-sync-error-btn" class="clear-sync-error-btn">エラーをクリア</button>
+                        </div>
+
+                        <div class="sync-actions">
+                            <button id="dropbox-sync-btn">
+                                <span class="material-symbols-outlined">sync</span>
+                                今すぐ同期
+                            </button>
+                            <button id="dropbox-disconnect-btn">
+                                <span class="material-symbols-outlined">link_off</span>
+                                連携を解除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+
+
                       
                 <div id="gemini-grounding-param" class="settings-group">
                     <h3>ツール設定 (Gemini)</h3>
@@ -383,7 +477,6 @@
                     </label>
                     <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
                         ※ チェック時、モデルは回答生成のためにWeb検索を行います。<br>
-                        ※ Gemini 2.0以降でのみ対応(1.5以前は互換なし。エラーになる)<br>
                         ※ 推論モデルは推論内で検索する場合があり、引用データが帰らない場合がある。
                     </p>
                     <label class="checkbox-label" style="margin-top: 15px;">
@@ -401,6 +494,71 @@
                         ※ チェック時、モデルは応答時に必ずFunctionCallingで関数呼び出しを行います。<br>
                         ※ 応答時に必ずイラストを作成させたい時などに有効です。
                     </p>
+                </div>
+
+                <div class="settings-group" id="stable-diffusion-settings">
+                    <h3>画像生成 (Stable Diffusion)</h3>
+                    <p class="sd-description">
+                        ローカルネットワーク上のStable Diffusion WebUI (Forge/Reforge)と連携して画像を生成します。（上級者向け）<br>
+                        Forge/Reforgeを起動する際に <code>--listen</code> オプションを指定してください。
+                    </p>
+                    
+                    <label for="sd-api-url">WebUI のURL:</label>
+                    <input type="text" id="sd-api-url" placeholder="例: http://127.0.0.1:7860">
+
+                    <div class="param-grid">
+                        <div>
+                            <label for="sd-api-user">ユーザー名 (任意):</label>
+                            <input type="text" id="sd-api-user" placeholder="Basic認証ユーザー名">
+                        </div>
+                        <div>
+                            <label for="sd-api-password">パスワード (任意):</label>
+                            <input type="password" id="sd-api-password" placeholder="Basic認証パスワード">
+                            
+                        </div>
+                    </div>
+
+                    <button id="sd-test-connection-btn" class="settings-action-button">接続テスト</button>
+
+                    <div class="settings-group-subsection">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="sd-enable-quality-checker">
+                            生成画像クオリティチェッカーを有効にする
+                        </label>
+                        <p class="sd-description">
+                            画像生成後にGemini Visionモデルを使用し、プロンプト通りの画像が生成されたか自動で検証します。
+                        </p>
+                        <div id="sd-quality-checker-options" class="hidden">
+                            <label for="sd-qc-model">チェック用Visionモデル:</label>
+                            <select id="sd-qc-model">
+                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                            </select>
+
+                            <label for="sd-qc-prompt">チェック用システムプロンプト:</label>
+                            <textarea id="sd-qc-prompt" rows="5"></textarea>
+
+                            <div class="settings-group-subsection">
+                                <label for="sd-qc-retries">リトライ上限回数:</label>
+                                <input type="number" id="sd-qc-retries" min="0" max="10" step="1" placeholder="例: 3">
+                                <p class="sd-description" style="margin-top: 4px;">※NG判定時に、プロンプトを自動改善して再生成を試みる回数の上限です。</p>
+                                
+                                <label for="sd-prompt-improve-model">プロンプト改善用モデル:</label>
+                                <select id="sd-prompt-improve-model">
+                                    <optgroup label="推奨">
+                                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                    </optgroup>
+                                     <optgroup label="その他">
+                                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                                     </optgroup>
+                                </select>
+        
+                                <label for="sd-prompt-improve-system-prompt">プロンプト改善用システムプロンプト:</label>
+                                <textarea id="sd-prompt-improve-system-prompt" rows="5"></textarea>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
 
@@ -568,6 +726,13 @@
                        ※ 追加後は設定を保存の上、ページをリロード。
                    </p>
 
+                   <label class="checkbox-label" style="margin-top: 15px;">
+                    <input type="checkbox" id="debug-mode-toggle">
+                    デバッグモードを有効にする
+                </label>
+                <p style="font-size: 11px; color: var(--text-secondary); margin-top: -5px; margin-bottom: 10px;">
+                    ※ アプリ内の動作ログを収集・表示する機能です。開発者向け。
+                </p>
                    
                 </div>
 
@@ -677,14 +842,7 @@
                 <button id="close-memory-dialog-btn" value="close">閉じる</button>
             </div>
         </dialog>
-
-    
-        <!-- App Update Notification -->
-        <div id="update-notification" class="update-notification hidden">
-            <span>新しいバージョンが利用可能です。</span>
-            <button id="reload-for-update-btn">更新</button>
-        </div>
-
+        
         <!-- Progress Dialog -->
         <dialog id="progressDialog" class="custom-dialog progress-dialog">
             <div class="dialog-content">
@@ -756,7 +914,29 @@
             </div>
         </dialog>
 
+        <!-- Debug Log Dialog -->
+        <dialog id="debugLogDialog" class="custom-dialog">
+            <h3 class="dialog-title">デバッグログ</h3>
+            <div class="dialog-content">
+                <div id="log-container" class="log-container">
+                    <!-- ログはここに表示されます -->
+                </div>
+            </div>
+            <div class="dialog-actions" style="justify-content: space-between;">
+                <div class="log-actions-left">
+                    <button id="copy-logs-btn" value="copy">クリップボードにコピー</button>
+                    <button id="clear-logs-btn" value="clear" class="dialog-delete-btn">クリア</button>
+                </div>
+                <button id="close-log-dialog-btn" value="close">閉じる</button>
+            </div>
+        </dialog>
+
     <script src="prism.js" data-autoloader-path="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Sync Notification -->
+    <div id="sync-notification" class="sync-notification hidden">
+        <span id="sync-notification-icon" class="material-symbols-outlined"></span>
+        <span id="sync-notification-message"></span>
+    </div>
 </body>
 </html>
