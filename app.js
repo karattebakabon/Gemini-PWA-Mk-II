@@ -31,7 +31,7 @@ const DUPLICATE_SUFFIX = ' (コピー)';
 const IMPORT_PREFIX = '(取込) ';
 const LIGHT_THEME_COLOR = '#4a90e2';
 const DARK_THEME_COLOR = '#007aff';
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.1";
 const DEFAULT_ZAI_MODEL = 'glm-4.6';
 const VERSION_NOTICE_SESSION_KEY = 'pendingVersionNotice';
 const VERSION_ACK_STORAGE_KEY = 'appVersionAcknowledged';
@@ -46,7 +46,8 @@ const GEMINI_MODELS = [
     { value: 'gemini-2.0-flash-lite', label: 'gemini-2.0-flash-lite' },
     { value: 'gemini-2.5-flash-preview-09-2025', label: 'gemini-2.5-flash-preview-09-2025', group: 'プレビュー版' },
     { value: 'gemini-2.5-flash-lite-preview-09-2025', label: 'gemini-2.5-flash-lite-preview-09-2025', group: 'プレビュー版' },
-    { value: 'gemini-2.5-flash-image-preview', label: 'gemini-2.5-flash-image-preview (Nano Banana)', group: 'プレビュー版' }
+    { value: 'gemini-2.5-flash-image-preview', label: 'gemini-2.5-flash-image-preview (Nano Banana)', group: 'プレビュー版' },
+    { value: 'gemini-3-pro-preview', label: 'gemini-3-pro-preview', group: 'プレビュー版' }
 ];
 
 const ZAI_MODELS = [
@@ -56,6 +57,10 @@ const ZAI_MODELS = [
 ];
 
 const VERSION_HISTORY = {
+    "1.1": [
+        "gemini-3-pro-previewモデルを追加しました。",
+        "gemini-3-pro-previewでのFunction Calling使用時に発生していた「thought_signature」エラーを修正しました。"
+    ],
     "1.0": [
         "Dropbox連携機能とStable Diffusion WebUI/Forge/Reforge連携を追加し、PWA内のデータと画像生成ワークフローをクラウドやローカル環境とシームレスに同期できるようにしました。",
         "添付ファイルのサムネイル表示やアップデート内容を告知するダイアログ、URLコンテンツを取り込むfetch_url_content関数、プロファイルへのgemini-2.5-pro使用回数表示、デバッグモード切替などのUI/機能改善を実装しました。",
@@ -321,6 +326,9 @@ try {
         fixedRetryDelayInput: document.getElementById('fixed-retry-delay-seconds'),
         maxBackoffDelayContainer: document.getElementById('max-backoff-delay-container'),
         maxBackoffDelayInput: document.getElementById('max-backoff-delay-seconds'),
+        enableApiTimeoutCheckbox: document.getElementById('enable-api-timeout'),
+        apiTimeoutSecondsInput: document.getElementById('api-timeout-seconds'),
+        apiTimeoutOptions: document.getElementById('api-timeout-options'),
         googleSearchApiKeyInput: document.getElementById('google-search-api-key'),
         googleSearchEngineIdInput: document.getElementById('google-search-engine-id'),
         overlayOpacitySlider: document.getElementById('overlay-opacity-slider'),
@@ -497,6 +505,8 @@ const state = {
         useFixedRetryDelay: false,
         fixedRetryDelaySeconds: 15,
         maxBackoffDelaySeconds: 60,
+        enableApiTimeout: false,
+        apiTimeoutSeconds: 90,
         enableProofreading: false,
         proofreadingModelName: 'gemini-2.5-flash',
         proofreadingSystemInstruction: 'あなたはプロの編集者です。受け取った文章の過剰な読点を抑制し、日本語として違和感のない読点の使用量に校正してください。承知しました等の応答は行わず、校正後の文章のみ出力して下さい。読点の抑制以外の編集は禁止です。読点以外の文章には絶対に手を付けないで下さい。',
@@ -811,7 +821,7 @@ const dbUtils = {
                                 oldSettingsObject[item.key] = item.value;
                             });
 
-                            const profileSettingKeys = [
+                                const profileSettingKeys = [
                                 'apiProvider', 'apiKey', 'zaiApiKey', 'modelName', 'systemPrompt', 'temperature', 'maxTokens', 'topK', 'topP',
                                 'presencePenalty', 'frequencyPenalty', 'thinkingBudget', 'includeThoughts',
                                 'enableThoughtTranslation', 'thoughtTranslationModel', 'dummyUser',
@@ -1600,6 +1610,12 @@ const dbUtils = {
 const uiUtils = {
     setLoadingIndicatorText(text) {
         elements.loadingIndicator.textContent = text;
+    },
+    // APIタイムアウトオプションの表示/非表示を制御
+    updateApiTimeoutOptionsVisibility() {
+        const isEnabled = elements.enableApiTimeoutCheckbox.checked;
+        elements.apiTimeoutOptions.style.display = isEnabled ? 'block' : 'none';
+        elements.apiTimeoutSecondsInput.disabled = !isEnabled;
     },
     // オーバーレイの透明度を適用
     applyOverlayOpacity() {
@@ -2442,7 +2458,8 @@ createMessageElement(role, content, index, isStreamingPlaceholder = false, casca
         // プロバイダーとAPIキーの設定（要素が存在する場合のみ）
         if (elements.apiProviderSelect) {
             let provider = state.settings.apiProvider || 'gemini';
-            if (!state.settings.debugMode && provider === 'zai') {
+            const isDebugOnlyProvider = provider === 'zai';
+            if (!state.settings.debugMode && isDebugOnlyProvider) {
                 provider = 'gemini';
                 state.settings.apiProvider = provider;
                 if (state.activeProfile && state.activeProfile.settings) {
@@ -2502,6 +2519,9 @@ createMessageElement(role, content, index, isStreamingPlaceholder = false, casca
         elements.maxBackoffDelayInput.value = state.settings.maxBackoffDelaySeconds;
         elements.fixedRetryDelayContainer.classList.toggle('hidden', !state.settings.useFixedRetryDelay);
         elements.maxBackoffDelayContainer.classList.toggle('hidden', state.settings.useFixedRetryDelay);
+        elements.enableApiTimeoutCheckbox.checked = state.settings.enableApiTimeout || false;
+        elements.apiTimeoutSecondsInput.value = state.settings.apiTimeoutSeconds || 90;
+        this.updateApiTimeoutOptionsVisibility();
         elements.googleSearchApiKeyInput.value = state.settings.googleSearchApiKey || '';
         elements.googleSearchEngineIdInput.value = state.settings.googleSearchEngineId || '';
         const opacityPercent = Math.round((state.settings.overlayOpacity ?? 0.65) * 100);
@@ -3381,7 +3401,7 @@ const apiUtils = {
     },
 
     // Gemini APIを呼び出す
-    async callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false) {
+    async callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false, signal = null) {
         console.log(`[Debug] callGeminiApi: 現在の設定値を確認します。`, {
             forceFunctionCalling: state.settings.forceFunctionCalling,
             geminiEnableFunctionCalling: state.settings.geminiEnableFunctionCalling,
@@ -3393,8 +3413,11 @@ const apiUtils = {
             throw new Error("Gemini APIキーが設定されていません。");
         }
         
-        state.abortController = new AbortController();
-        const { signal } = state.abortController;
+        // signalが渡されていない場合のみstate.abortControllerを作成
+        if (!signal) {
+            state.abortController = new AbortController();
+            signal = state.abortController.signal;
+        }
 
         const model = state.settings.modelName || DEFAULT_MODEL;
 
@@ -3665,7 +3688,7 @@ const apiUtils = {
     },
 
     // Z.ai APIを呼び出す
-    async callZaiApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false) {
+    async callZaiApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false, signal = null) {
         console.log(`[Debug] callZaiApi: Z.ai APIを呼び出します。`);
 
         const apiKey = state.settings.zaiApiKey || state.settings.apiKey;
@@ -3673,8 +3696,11 @@ const apiUtils = {
             throw new Error("Z.ai APIキーが設定されていません。");
         }
 
-        state.abortController = new AbortController();
-        const { signal } = state.abortController;
+        // signalが渡されていない場合のみstate.abortControllerを作成
+        if (!signal) {
+            state.abortController = new AbortController();
+            signal = state.abortController.signal;
+        }
 
         const model = state.settings.modelName || DEFAULT_ZAI_MODEL;
 
@@ -3863,13 +3889,13 @@ const apiUtils = {
     },
 
     // プロバイダーに応じて適切なAPIを呼び出すラッパー関数
-    async callApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false) {
+    async callApi(messagesForApi, generationConfig, systemInstruction, tools = null, forceCalling = false, signal = null) {
         const provider = state.settings.apiProvider || 'gemini';
         
         if (provider === 'zai') {
-            return await this.callZaiApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling);
+            return await this.callZaiApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling, signal);
         } else {
-            return await this.callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling);
+            return await this.callGeminiApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling, signal);
         }
     }
 };
@@ -4899,8 +4925,15 @@ const appLogic = {
             await dbUtils.openDB();
         } catch (dbError) {
             console.error("初期化中のDBオープンに失敗:", dbError);
-            await uiUtils.showCustomAlert(`データベースの起動に失敗しました: ${dbError.message}`);
-            elements.appContainer.innerHTML = `<p style="padding: 20px; text-align: center; color: red;">アプリの起動に失敗しました。</p>`;
+            const shouldReload = await uiUtils.showCustomConfirm(
+                `データベースの起動に失敗しました: ${dbError.message}\n\nハードリロードを実行しますか？\n（チャット履歴などのデータは保持されます）`
+            );
+            if (shouldReload) {
+                console.log("ユーザーがリロードを選択しました。");
+                window.location.reload(true);
+            } else {
+                elements.appContainer.innerHTML = `<p style="padding: 20px; text-align: center; color: red;">アプリの起動に失敗しました。</p>`;
+            }
             return;
         }
     
@@ -5170,7 +5203,14 @@ const appLogic = {
     
         } catch (error) {
             console.error("初期化中のデータ処理で失敗:", error);
-            await uiUtils.showCustomAlert(`データの読み込みに失敗しました: ${error.message}`);
+            const shouldReload = await uiUtils.showCustomConfirm(
+                `データの読み込みに失敗しました: ${error.message}\n\nハードリロードを実行しますか？\n（チャット履歴などのデータは保持されます）`
+            );
+            if (shouldReload) {
+                console.log("ユーザーがリロードを選択しました。");
+                window.location.reload(true);
+                return; // リロード後は処理を終了
+            }
         } finally {
             // --- ステップ5: 最終的なUI設定と表示 ---
             if (isSyncReload) uiUtils.updateProgressMessage('画面を描画中...');
@@ -5824,7 +5864,8 @@ const appLogic = {
                 element: elements.apiProviderSelect, 
                 event: 'change',
                 onUpdate: (value) => {
-                    if (!state.settings.debugMode && value === 'zai') {
+                    const isDebugOnlyProvider = value === 'zai';
+                    if (!state.settings.debugMode && isDebugOnlyProvider) {
                         const fallbackProvider = 'gemini';
                         state.settings.apiProvider = fallbackProvider;
                         if (state.activeProfile && state.activeProfile.settings) {
@@ -5838,7 +5879,7 @@ const appLogic = {
                         }
                         this.updateProviderUI(fallbackProvider);
                         this.updateModelOptions(fallbackProvider);
-                        uiUtils.showCustomAlert("デバッグモードが無効のため、Z.aiは選択できません。");
+                        uiUtils.showCustomAlert("デバッグモードが無効のため、このプロバイダーは選択できません。Geminiに戻しました。");
                         return;
                     }
                     this.updateProviderUI(value);
@@ -5881,7 +5922,8 @@ const appLogic = {
                     elements.apiProviderRow.classList.toggle('hidden', !value);
                 }
 
-                if (!value && state.settings.apiProvider === 'zai') {
+                const isDebugOnlyProvider = state.settings.apiProvider === 'zai';
+                if (!value && isDebugOnlyProvider) {
                     const fallbackProvider = 'gemini';
                     state.settings.apiProvider = fallbackProvider;
                     if (state.activeProfile && state.activeProfile.settings) {
@@ -5915,6 +5957,8 @@ const appLogic = {
             useFixedRetryDelay: { element: elements.useFixedRetryDelayCheckbox, event: 'change' },
             fixedRetryDelaySeconds: { element: elements.fixedRetryDelayInput, event: 'input' },
             maxBackoffDelaySeconds: { element: elements.maxBackoffDelayInput, event: 'input' },
+            enableApiTimeout: { element: elements.enableApiTimeoutCheckbox, event: 'change' },
+            apiTimeoutSeconds: { element: elements.apiTimeoutSecondsInput, event: 'input' },
             googleSearchApiKey: { element: elements.googleSearchApiKeyInput, event: 'input' },
             googleSearchEngineId: { element: elements.googleSearchEngineIdInput, event: 'input' },
             overlayOpacity: { element: elements.overlayOpacitySlider, event: 'input', onUpdate: () => uiUtils.applyOverlayOpacity() },
@@ -5991,6 +6035,10 @@ const appLogic = {
         elements.includeThoughtsToggle.addEventListener('change', () => {
             const isEnabled = elements.includeThoughtsToggle.checked;
             elements.thoughtTranslationOptionsDiv.classList.toggle('hidden', !isEnabled);
+        });
+        
+        elements.enableApiTimeoutCheckbox.addEventListener('change', () => {
+            uiUtils.updateApiTimeoutOptionsVisibility();
         });
         
         elements.updateAppBtn.addEventListener('click', () => this.updateApp());
@@ -7474,7 +7522,11 @@ const appLogic = {
                     console.log("[_internalHandleSend] テキスト応答がなかったため、ツール結果を基に最終応答を生成します。");
                     uiUtils.setLoadingIndicatorText('最終応答を生成中...');
 
-                    const modelMessageForApi = { role: 'model', parts: result.toolCalls.map(tc => ({ functionCall: tc.functionCall })) };
+                    const partsForApi = [
+                        ...(result.thoughtParts || []),
+                        ...result.toolCalls.map(tc => ({ functionCall: tc.functionCall }))
+                    ];
+                    const modelMessageForApi = { role: 'model', parts: partsForApi };
                     const toolResultsForApi = toolResults.map(tr => ({ 
                         role: 'tool', 
                         parts: [{ 
@@ -7500,18 +7552,24 @@ const appLogic = {
                 break;
             }
 
-            const modelMessageForApi = { role: 'model', parts: result.toolCalls.map(tc => ({ functionCall: tc.functionCall })) };
-            const toolResultsForApi = toolResults.map(tr => ({ 
-                role: 'tool', 
-                parts: [{ 
-                    functionResponse: { 
-                        name: tr.name, 
-                        response: tr.response,
-                        _toolCallId: tr._toolCallId  // OpenAI互換APIのtool_call_idを引き継ぐ
-                    } 
-                }] 
-            }));
-            currentTurnHistory.push(modelMessageForApi, ...toolResultsForApi);
+                const partsForApi = [
+                    ...(result.thoughtParts || []),
+                    ...result.toolCalls.map(tc => ({ functionCall: tc.functionCall }))
+                ];
+
+                const modelMessageForApi = { role: 'model', parts: partsForApi };
+                const toolResultsForApi = toolResults.map(tr => ({
+                    role: 'tool',
+                    parts: [{
+                        functionResponse: {
+                            name: tr.name,
+                            response: tr.response,
+                            _toolCallId: tr._toolCallId  // OpenAI互換APIのtool_call_idを引き継ぐ
+                        }
+                    }]
+                }));
+                currentTurnHistory.push(modelMessageForApi, ...toolResultsForApi);
+            
             uiUtils.setLoadingIndicatorText('応答生成中...');
         }
 
@@ -8648,21 +8706,41 @@ const appLogic = {
                 // 成功したので、待避していたデータを取得し、待避領域をクリア
                 const finalOriginalResponses = state.pendingCascadeResponses || [];
                 state.pendingCascadeResponses = null;
-    
+
                 const siblingGroupId = (finalOriginalResponses.length > 0 && finalOriginalResponses[0].siblingGroupId)
                     ? finalOriginalResponses[0].siblingGroupId
                     : `gid-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    
+
                 finalOriginalResponses.forEach(msg => {
                     msg.isCascaded = true;
                     msg.isSelected = false;
                     msg.siblingGroupId = siblingGroupId;
                 });
-    
+
+                // 最終結果のexecutedFunctionsを初期化
+                newAggregatedMessage.executedFunctions = newAggregatedMessage.executedFunctions || [];
+                
+                // 再生成中に実行された関数呼び出しがあれば、それらも新しいメッセージのexecutedFunctionsに追加する
+                newMessages.forEach(msg => {
+                    if (msg.executedFunctions && Array.isArray(msg.executedFunctions)) {
+                         msg.executedFunctions.forEach(funcName => {
+                             if (!newAggregatedMessage.executedFunctions.includes(funcName)) {
+                                 newAggregatedMessage.executedFunctions.push(funcName);
+                             }
+                         });
+                    }
+                    // ツール実行結果からも復元
+                     if (msg.role === 'tool' && msg.name) {
+                         if (!newAggregatedMessage.executedFunctions.includes(msg.name)) {
+                             newAggregatedMessage.executedFunctions.push(msg.name);
+                         }
+                     }
+                });
+                
                 newAggregatedMessage.isCascaded = true;
                 newAggregatedMessage.isSelected = true;
                 newAggregatedMessage.siblingGroupId = siblingGroupId;
-    
+
                 state.currentMessages.splice(modelMessageIndex, 1, ...finalOriginalResponses, newAggregatedMessage);
                 uiUtils.renderChatMessages();
                 this.scrollToBottom();
@@ -9004,8 +9082,27 @@ const appLogic = {
         let lastError = null;
         const maxRetries = state.settings.enableAutoRetry ? state.settings.maxRetries : 0;
         const forceCalling = state.settings.forceFunctionCalling && isFirstCall;
+        
+        // state.abortControllerを確実に作成（ユーザーの手動キャンセル用）
+        if (!state.abortController) {
+            state.abortController = new AbortController();
+        }
+        
+        // タイムアウト設定の取得
+        const timeoutEnabled = state.settings.enableApiTimeout || false;
+        const timeoutMs = timeoutEnabled ? (state.settings.apiTimeoutSeconds || 90) * 1000 : null;
+        
+        if (timeoutEnabled) {
+            console.log(`[Timeout] APIタイムアウト有効: ${timeoutMs}ms`);
+        } else {
+            console.log(`[Timeout] APIタイムアウト無効`);
+        }
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            // このリトライ専用のAbortController
+            const attemptController = new AbortController();
+            let timeoutId = null;
+            
             try {
                 if (state.abortController?.signal.aborted) {
                     throw new DOMException("リクエストがキャンセルされました。", "AbortError");
@@ -9032,7 +9129,17 @@ const appLogic = {
                     uiUtils.setLoadingIndicatorText(`${attempt}回目の再試行中...`);
                 }
 
-                const response = await apiUtils.callApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling);
+                // タイムアウトタイマーの設定
+                const startTime = Date.now();
+                if (timeoutEnabled && timeoutMs) {
+                    timeoutId = setTimeout(() => {
+                        const elapsed = Date.now() - startTime;
+                        console.warn(`[Timeout] API呼び出しが${elapsed}ms経過。タイムアウト(${timeoutMs}ms)により中断します。`);
+                        attemptController.abort();
+                    }, timeoutMs);
+                }
+
+                const response = await apiUtils.callApi(messagesForApi, generationConfig, systemInstruction, tools, forceCalling, attemptController.signal);
 
                 const getFinishReasonError = (candidate) => {
                     const reason = candidate?.finishReason;
@@ -9065,6 +9172,14 @@ const appLogic = {
                 // 非ストリーミングの処理に統一
                 const responseData = await response.json();
                 
+                // タイマークリア（成功時）
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                    const elapsed = Date.now() - startTime;
+                    console.log(`[API Call] レスポンス取得成功 (所要時間: ${elapsed}ms)`);
+                }
+                
                 if (responseData.promptFeedback) {
                     const blockReason = responseData.promptFeedback.blockReason || 'SAFETY';
                     throw new Error(`APIが応答をブロックしました (理由: ${blockReason})`);
@@ -9081,19 +9196,38 @@ const appLogic = {
                 let finalContent = '';
                 let finalThoughtSummary = '';
                 let finalToolCalls = [];
+                let finalThoughtParts = [];
 
                 parts.forEach(part => {
-                    if (part.text) {
+                    // Thought Signature + Function Call の検出 (Gemini 3の関数呼び出し)
+                    // thoughtSignature と functionCall の両方を持つパートのみ特別扱い
+                    if (part.thoughtSignature && part.functionCall) {
+                        finalThoughtParts.push(part);
+                        finalToolCalls.push({ functionCall: part.functionCall });
+                    }
+                    
+                    // Thought Partの検出 (旧形式: thought がオブジェクトの場合)
+                    else if (part.thought && part.thought !== true) {
+                        finalThoughtParts.push(part);
+                    }
+
+                    // テキストコンテンツの処理
+                    // thoughtSignatureを持つがfunctionCallを持たないパートもここで処理
+                    else if (part.text) {
                         if (part.thought === true) {
                             finalThoughtSummary += part.text;
                         } else {
                             finalContent += part.text;
                         }
-                    } else if (part.functionCall) {
+                    }
+                    
+                    // 関数呼び出しの処理（thoughtSignatureを持たない通常のfunctionCall）
+                    else if (part.functionCall) {
                         finalToolCalls.push({ functionCall: part.functionCall });
                     }
                 });
 
+                // 古い形式のthoughts（candidate.thoughts）の処理
                 if (candidate.thoughts?.parts) {
                     candidate.thoughts.parts.forEach(part => {
                         if (part.text) {
@@ -9113,6 +9247,7 @@ const appLogic = {
                     content: finalContent,
                     thoughtSummary: finalThoughtSummary.trim() || null,
                     toolCalls: finalToolCalls.length > 0 ? finalToolCalls : null,
+                    thoughtParts: finalThoughtParts.length > 0 ? finalThoughtParts : null, // 追加
                     finishReason: candidate.finishReason,
                     safetyRatings: candidate.safetyRatings,
                     usageMetadata: responseData.usageMetadata,
@@ -9120,16 +9255,36 @@ const appLogic = {
                 };
 
             } catch (error) {
+                // タイマークリーンアップ
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
 
                 lastError = error;
-                if (error.name === 'AbortError') {
+                
+                // タイムアウトによるAbortの判定
+                if (error.name === 'AbortError' && attemptController.signal.aborted && !state.abortController?.signal.aborted) {
+                    // attemptControllerによるAbort = タイムアウト
+                    const timeoutError = new Error(`APIタイムアウト: ${timeoutMs}ms以内にレスポンスが返りませんでした。`);
+                    timeoutError.isTimeout = true;
+                    lastError = timeoutError;
+                    console.warn(`[Timeout] タイムアウト検出。エラーとして扱い、リトライ機構に委ねます。`);
+                    // continueせずにそのままcatchブロックの末尾へ（= リトライループ継続）
+                }
+                
+                // ユーザーによる手動キャンセル
+                if (error.name === 'AbortError' && state.abortController?.signal.aborted) {
                     console.error("待機中または通信中に中断されました。リトライを中止します。", error);
                     throw error;
                 }
+                
+                // 4xx系エラーは即座に終了
                 if (error.status && error.status >= 400 && error.status < 500) {
                     console.error(`リトライ不可のエラー (ステータス: ${error.status})。リトライを中止します。`, error);
                     throw error;
                 }
+                
                 console.warn(`API呼び出し/処理試行 ${attempt + 1} が失敗しました。`, error);
                 if (error.candidate) {
                     console.error("ブロックされた応答の詳細:", JSON.stringify(error.candidate, null, 2));
